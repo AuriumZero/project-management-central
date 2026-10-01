@@ -171,6 +171,25 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
 
   useImperativeHandle(ref, () => ({ scrollToToday, addTask }))
 
+  // Enter saves a cell and moves to the same column one row down (Shift+Enter: up), like a
+  // spreadsheet. Enter in the last task's name adds a new task below it at the same level.
+  const enterToNextRow = (e: KeyboardEvent<HTMLDivElement>) => {
+    const input = e.target as HTMLElement
+    if (e.key !== 'Enter' || !input.matches('input.cell')) return
+    const column = input.closest('[role=gridcell]')?.className.split(' ')[0]
+    const row = input.closest<HTMLElement>('[role=row]')
+    if (!column || !row) return
+    for (let next = row[e.shiftKey ? 'previousElementSibling' : 'nextElementSibling']; next; next = next[e.shiftKey ? 'previousElementSibling' : 'nextElementSibling']) {
+      const target = next.matches('[role=row]') && next.querySelector<HTMLInputElement>(`.${column} input:not(:disabled)`)
+      if (target) {
+        target.focus()
+        target.select()
+        return
+      }
+    }
+    if (!e.shiftKey && column === 'c-name' && row.dataset.id) addTask(row.dataset.parent ?? '')
+  }
+
   // Start each project and zoom level with today in view.
   useLayoutEffect(() => { scrollToToday('instant') }, [project.id, zoom])
 
@@ -311,6 +330,7 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
              aria-label="Tasks"
              style={{ '--full': `${full}px` } as CSSProperties}
              onScroll={(e) => { if (headClip.current) headClip.current.scrollLeft = e.currentTarget.scrollLeft }}
+             onKeyDown={enterToNextRow}
            >
             {summary && (
               <ProjectRow project={project} summary={summary} show={col.show} dispatch={dispatch} />
@@ -488,7 +508,7 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
   }
 
   return (
-    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}`} role="row" data-row={num} data-id={task.id}>
+    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}`} role="row" data-row={num} data-id={task.id} data-parent={task.parentId}>
       <span className="c-id mono" role="gridcell">{num}</span>
       <span className="c-name" role="gridcell" style={{ paddingLeft: depth * 18 }}>
         {hasChildren ? (
