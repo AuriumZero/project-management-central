@@ -105,6 +105,48 @@ describe('App', () => {
     expect(risk).toMatchObject({ impact: 'high', likelihood: 25, notes: 'Backup venue on hold' })
   })
 
+  it('turns a column pasted from Excel into that many tasks, as one undo step', async () => {
+    const user = renderApp()
+    const before = loadState()?.projects[0].tasks.length ?? seedState().projects[0].tasks.length
+    await user.click(screen.getByRole('button', { name: '+ Task' }))
+    await user.paste('Book venue\r\nSend invites\r\nOrder catering\r\n')
+    const names = loadState()!.projects[0].tasks.map((t) => t.name)
+    expect(names.slice(-3)).toEqual(['Book venue', 'Send invites', 'Order catering'])
+    expect(names).toHaveLength(before + 3)
+    expect(screen.getByRole('status')).toHaveTextContent('Pasted 3 rows, adding 2 tasks.')
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.queryByDisplayValue('Send invites')).not.toBeInTheDocument()
+  })
+
+  it('pastes several columns, starting from the column you paste into', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    await user.click(screen.getByRole('button', { name: '+ Task' }))
+    await user.paste('Brief\t11/16/2026\t\t3\t\tRobin\t50%\nShoot\t11/23/2026\t\t2\t\tSam\t0')
+    const saved = loadState()!.projects[0].tasks
+    expect(saved.find((t) => t.name === 'Brief')).toMatchObject({ start: '2026-11-16', end: '2026-11-18', assignee: 'Robin', progress: 50 })
+    expect(saved.find((t) => t.name === 'Shoot')).toMatchObject({ start: '2026-11-23', end: '2026-11-24', assignee: 'Sam' })
+  })
+
+  it('classifies, sorts and pastes risks', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('tab', { name: 'Risks & issues' }))
+    const names = () => screen.getAllByLabelText(/^Risk \d+$/).map((i) => (i as HTMLInputElement).value)
+    expect(screen.getByLabelText('Type of Front-end developer on leave for a week in October')).toHaveValue('issue')
+    await user.click(screen.getByRole('button', { name: /Likelihood/ }))
+    expect(names()[0]).toBe('Old blog URLs break on launch')
+    await user.click(screen.getByRole('button', { name: /Likelihood/ }))
+    expect(names()[0]).toBe('Front-end developer on leave for a week in October')
+    await user.click(screen.getByRole('button', { name: /^ID/ }))
+    await user.click(screen.getByRole('button', { name: '+ Risk' }))
+    await user.paste('Supplier goes bust\tRisk\tHigh\t10%\nPrinter broke\tIssue\tlow\t100%\tReplaced it')
+    const risks = loadState()!.projects[0].risks
+    expect(risks.slice(-2)).toMatchObject([
+      { name: 'Supplier goes bust', kind: 'risk', impact: 'high', likelihood: 10 },
+      { name: 'Printer broke', kind: 'issue', impact: 'low', likelihood: 100, notes: 'Replaced it' },
+    ])
+  })
+
   it('refuses an edit that ends before it starts', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))

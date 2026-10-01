@@ -31,6 +31,8 @@ export type Action =
   | { type: 'setTicketStatus'; id: string; status: Status }
   | { type: 'deleteTicket'; id: string }
   | { type: 'replaceAll'; state: AppState }
+  /** Several changes as one step, so a paste is undone in one go. */
+  | { type: 'batch'; actions: Action[] }
 
 export function currentProject(state: AppState): Project | undefined {
   return state.projects.find((p) => p.id === state.current) ?? state.projects[0]
@@ -271,5 +273,8 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'replaceAll':
       return action.state
+
+    case 'batch':
+      return action.actions.reduce(reducer, state)
   }
 }
