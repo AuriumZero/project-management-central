@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Project Management Central</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: project rail on the left, workspace on the right with a Gantt timeline or a ticket board. */
+:root {
+  --bg: #f3f5f4; --surface: #ffffff; --sunk: #e8ecea; --line: #d5dcd9; --fg: #17201d; --muted: #5d6b66;
+  --accent: #0f6e66; --accent-fg: #ffffff; --accent-soft: #d3ebe7; --bar: #2f8c82; --bar-done: #8aa39c;
+  --weekend: rgba(23,32,29,.035); --today: #c2410c;
+  --p-low: #64748b; --p-medium: #2563eb; --p-high: #c2410c; --p-urgent: #b91c1c;
+  --f-display: "Familjen Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #101614; --surface: #18201d; --sunk: #0c110f; --line: #2b3632; --fg: #e4ebe8; --muted: #93a39d;
+  --accent: #4fc1b4; --accent-fg: #06201c; --accent-soft: #173733; --bar: #3a9e93; --bar-done: #4f6660;
+  --weekend: rgba(255,255,255,.03); --today: #fb923c;
+  --p-low: #94a3b8; --p-medium: #60a5fa; --p-high: #fb923c; --p-urgent: #f87171; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #101614; --surface: #18201d; --sunk: #0c110f; --line: #2b3632; --fg: #e4ebe8; --muted: #93a39d;
+  --accent: #4fc1b4; --accent-fg: #06201c; --accent-soft: #173733; --bar: #3a9e93; --bar-done: #4f6660;
+  --weekend: rgba(255,255,255,.03); --today: #fb923c;
+  --p-low: #94a3b8; --p-medium: #60a5fa; --p-high: #fb923c; --p-urgent: #f87171; color-scheme: dark }
+
+* { box-sizing: border-box }
+html, body { height: 100% }
+body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--f-body); margin: 0 }
+button, input, select, textarea { font: inherit; color: inherit }
+button { cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -.01em }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums }
+
+.app { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100% }
+.rail { background: var(--sunk); border-right: 1px solid var(--line); padding: 20px 16px; display: flex; flex-direction: column; gap: 18px }
+.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; line-height: 1.15 }
+.brand small { display: block; font: 500 11px var(--f-body); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin-top: 4px }
+.label { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted) }
+.plist { display: flex; flex-direction: column; gap: 2px; margin-top: 8px }
+.pitem { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: var(--r) }
+.pitem:hover { background: var(--surface) }
+.pitem[aria-current="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line) }
+.pitem .key { font: 500 11px var(--f-mono); color: var(--muted); min-width: 34px }
+.pitem .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0 }
+.rail-foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px }
+
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 6px 12px; font-weight: 500 }
+.btn:hover { border-color: var(--muted) }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg) }
+.btn.ghost { background: none; border-color: transparent; color: var(--muted) }
+.btn.ghost:hover { color: var(--fg); border-color: var(--line) }
+.btn.danger { color: var(--p-urgent) }
+.btn.small { padding: 3px 9px; font-size: 13px }
+
+.main { padding: 22px 24px 32px; min-width: 0; display: flex; flex-direction: column; gap: 16px }
+.phead { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 24px; justify-content: space-between }
+.phead h1 { font-size: 26px; font-weight: 700 }
+.phead .desc { color: var(--muted); margin-top: 4px; max-width: 65ch }
+.stats { display: flex; flex-wrap: wrap; gap: 8px }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px; display: flex; flex-direction: column; min-width: 92px }
+.stat b { font: 600 18px var(--f-display); font-variant-numeric: tabular-nums }
+.stat span { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase }
+.meter { height: 4px; background: var(--sunk); border-radius: 2px; margin-top: 4px; overflow: hidden }
+.meter i { display: block; height: 100%; background: var(--accent) }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between }
+.tabs { display: inline-flex; background: var(--sunk); border-radius: var(--r); padding: 3px; gap: 2px }
+.tabs button { border: 0; background: none; padding: 6px 14px; border-radius: 4px; font-weight: 500; color: var(--muted) }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden }
+.seg button { border: 0; background: var(--surface); padding: 5px 10px; font-size: 13px; color: var(--muted) }
+.seg button + button { border-left: 1px solid var(--line) }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); font-weight: 600 }
+.input { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 6px 10px; min-width: 0 }
+
+/* Gantt */
+.gantt { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); max-height: max(360px, calc(100vh - 230px)); position: relative }
+.g-inner { position: relative }
+.g-head { position: sticky; top: 0; z-index: 7; display: flex; height: 50px; background: var(--surface); border-bottom: 1px solid var(--line) }
+.g-corner { position: sticky; left: 0; z-index: 8; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; align-items: flex-end; padding: 0 12px 7px }
+.g-scale { position: relative; flex: none }
+.g-mon { position: absolute; top: 6px; font: 600 12px var(--f-display); white-space: nowrap; padding-left: 6px; border-left: 1px solid var(--line); height: 40px }
+.g-day { position: absolute; bottom: 6px; font: 400 10.5px var(--f-mono); color: var(--muted); text-align: center }
+.g-day.wk { color: var(--fg) }
+.g-day.now { color: var(--surface); background: var(--today); border-radius: 3px; font-weight: 600 }
+.g-rows { display: flex }
+.g-names { position: sticky; left: 0; z-index: 6; flex: none; background: var(--surface); border-right: 1px solid var(--line) }
+.g-name { height: var(--rh); display: flex; flex-direction: column; justify-content: center; padding: 0 12px; border-bottom: 1px solid var(--sunk); cursor: pointer; min-width: 0 }
+.g-name:hover { background: var(--sunk) }
+.g-name .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500 }
+.g-name .d { font: 10.5px var(--f-mono); color: var(--muted); white-space: nowrap }
+.g-add { height: var(--rh); display: flex; align-items: center; padding: 0 8px }
+.g-body { position: relative; flex: none }
+.g-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--sunk) }
+.g-wkend { position: absolute; top: 0; bottom: 0; background: var(--weekend) }
+.g-rowline { position: absolute; left: 0; right: 0; height: 1px; background: var(--sunk) }
+.g-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--today); z-index: 2 }
+.g-today-tag { position: absolute; top: 2px; transform: translateX(-50%); font: 600 9.5px var(--f-mono); color: var(--surface); background: var(--today); padding: 1px 4px; border-radius: 3px; letter-spacing: .04em }
+.g-svg { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; overflow: visible }
+.g-svg path { fill: none; stroke: var(--muted); stroke-width: 1.3 }
+.g-svg marker path { fill: var(--muted); stroke: none }
+.bar { position: absolute; height: 22px; border-radius: 4px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--bar); z-index: 3; cursor: grab; touch-action: none; user-select: none; overflow: visible }
+.bar.dragging { cursor: grabbing; opacity: .85 }
+.bar .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 4px 0 0 4px }
+.bar.done { box-shadow: inset 0 0 0 1px var(--bar-done) }
+.bar.done .fill { background: var(--bar-done); border-radius: 4px }
+.bar .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2 }
+.bar .h.l { left: -2px } .bar .h.r { right: -2px }
+.bar .lbl { position: absolute; left: calc(100% + 8px); top: 3px; white-space: nowrap; font-size: 12px; color: var(--muted); pointer-events: none }
+.bar.ms { width: 18px !important; height: 18px; background: var(--today); box-shadow: none; transform: rotate(45deg); border-radius: 3px }
+.bar.ms .lbl { transform: rotate(-45deg); transform-origin: left top; left: 22px; top: 12px; color: var(--fg); font-weight: 600 }
+.drag-tip { position: fixed; z-index: 50; pointer-events: none; background: var(--fg); color: var(--bg); font: 11px var(--f-mono); padding: 3px 7px; border-radius: 4px }
+
+/* Board */
+.board { display: grid; grid-template-columns: repeat(4, minmax(230px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 6px }
+.col { background: var(--sunk); border-radius: var(--r); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 240px }
+.col.over { box-shadow: inset 0 0 0 2px var(--accent) }
+.col-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 4px }
+.col-h h3 { font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: baseline }
+.col-h h3 .n { font: 500 11px var(--f-mono); color: var(--muted) }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; cursor: grab; text-align: left; width: 100% }
+.card:hover { border-color: var(--muted) }
+.card.dragging { opacity: .4 }
+.card .top { display: flex; justify-content: space-between; gap: 8px; align-items: center }
+.card .k { font: 500 11px var(--f-mono); color: var(--muted) }
+.card .ti { font-weight: 500; overflow-wrap: anywhere }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; color: var(--muted) }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; text-transform: capitalize }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor }
+.pill.low { color: var(--p-low) } .pill.medium { color: var(--p-medium) } .pill.high { color: var(--p-high) } .pill.urgent { color: var(--p-urgent) }
+.tag { border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; font-size: 11px; text-transform: capitalize }
+.tag.bug { color: var(--p-urgent); border-color: currentColor }
+.due.late { color: var(--p-urgent); font-weight: 600 }
+.empty { color: var(--muted); font-size: 12.5px; text-align: center; padding: 14px 4px; border: 1px dashed var(--line); border-radius: var(--r) }
+.blank { background: var(--surface); border: 1px dashed var(--line); border-radius: var(--r); padding: 40px 20px; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; color: var(--muted) }
+
+/* Modal */
+.scrim { position: fixed; inset: 0; background: rgba(8,14,12,.45); z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding: max(5vh, 16px) 16px 16px; overflow: auto }
+.modal { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; width: min(560px, 100%); padding: 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.25) }
+.modal h2 { font-size: 19px }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0 }
+.field.full { grid-column: 1 / -1 }
+.field > span { font-size: 12px; font-weight: 600; color: var(--muted) }
+.field .input { width: 100% }
+textarea.input { resize: vertical; min-height: 84px }
+.deps { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r); padding: 6px 10px }
+.deps label { display: flex; gap: 8px; align-items: center }
+.mfoot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center }
+.mfoot .r { display: flex; gap: 8px; margin-left: auto }
+.note { font-size: 12.5px; color: var(--muted) }
+.toast { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: var(--r); z-index: 60; font-weight: 500 }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr }
+  .rail { border-right: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; gap: 10px }
+  .plist { flex-direction: row; overflow-x: auto; margin-top: 4px }
+  .pitem { flex: none; width: auto; max-width: 220px }
+  .rail-foot { margin-top: 0 }
+  .main { padding: 16px 16px 28px }
+  .phead h1 { font-size: 22px }
+  .fgrid { grid-template-columns: 1fr }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">Project Management Central<small>Plans · Gantt · Tickets</small></div>
+    <div>
+      <div class="label">Projects</div>
+      <nav class="plist" id="plist"></nav>
+    </div>
+    <button class="btn" id="newProject">+ New project</button>
+    <div class="rail-foot">
+      <button class="btn ghost small" id="exportBtn">Back up data</button>
+      <button class="btn ghost small" id="importBtn">Restore</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div id="modalRoot"></div>
+
+<script>
+(() => {
+'use strict';
+const KEY = 'pmc.v1';
+const DAY = 864e5;
+const STATUSES = [['backlog','Backlog'],['todo','To do'],['doing','In progress'],['done','Done']];
+const PRIORITIES = ['low','medium','high','urgent'];
+const TYPES = ['task','feature','bug','chore'];
+const ZOOM = { day: 34, week: 14, month: 5 };
+const RH = 40;
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const d2n = s => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / DAY); };
+const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
+const todayN = () => { const t = new Date(); return Math.round(Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()) / DAY); };
+const fmt = (n, opts = { month: 'short', day: 'numeric' }) => new Date(n * DAY).toLocaleDateString('en-US', { ...opts, timeZone: 'UTC' });
+const dow = n => (n + 4) % 7; // 0 = Sunday
+const dur = t => d2n(t.end) - d2n(t.start) + 1;
+
+// ---------- state ----------
+function seed() {
+  const T = todayN(), D = k => n2d(T + k);
+  const ids = Array.from({ length: 7 }, uid);
+  const tasks = [
+    { id: ids[0], name: 'Discovery & requirements', start: D(-12), end: D(-6), progress: 100, deps: [] },
+    { id: ids[1], name: 'Wireframes', start: D(-5), end: D(1), progress: 75, deps: [ids[0]] },
+    { id: ids[2], name: 'Visual design', start: D(2), end: D(9), progress: 0, deps: [ids[1]] },
+    { id: ids[3], name: 'Build front end', start: D(10), end: D(24), progress: 0, deps: [ids[2]] },
+    { id: ids[4], name: 'Content migration', start: D(6), end: D(18), progress: 10, deps: [] },
+    { id: ids[5], name: 'QA & fixes', start: D(25), end: D(30), progress: 0, deps: [ids[3], ids[4]] },
+    { id: ids[6], name: 'Launch', start: D(31), end: D(31), progress: 0, deps: [ids[5]], milestone: true },
+  ];
+  const tk = (n, title, status, priority, type, taskId, due, description = '') =>
+    ({ id: uid(), num: n, title, status, priority, type, taskId, due: due == null ? '' : D(due), description, created: D(-14) });
+  const tickets = [
+    tk(1, 'Interview three customers about checkout', 'done', 'medium', 'task', ids[0]),
+    tk(2, 'Mobile nav wireframe', 'doing', 'high', 'feature', ids[1], 1, 'Hamburger vs. bottom bar. Test both with two people.'),
+    tk(3, 'Pricing page wireframe', 'todo', 'medium', 'feature', ids[1], 1),
+    tk(4, 'Pick type and colour palette', 'todo', 'medium', 'task', ids[2], 5),
+    tk(5, 'Old blog URLs return 404', 'backlog', 'urgent', 'bug', ids[4], 12, 'Need 301 redirects for /blog/YYYY/slug.'),
+    tk(6, 'Export product copy from old CMS', 'doing', 'low', 'chore', ids[4], 9),
+    tk(7, 'Set up analytics events', 'backlog', 'low', 'task', ids[3]),
+  ];
+  return {
+    v: 1, current: 'p1',
+    projects: [{ id: 'p1', name: 'Website relaunch (example)', key: 'WEB', description: 'Sample project to show how plans, the Gantt chart and tickets fit together. Edit it or delete it.', tasks, tickets, seq: 7, view: 'gantt', zoom: 'day' }],
+  };
+}
+function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.projects)) return s; } catch (e) {} return null; }
+let S = load() || seed();
+let storageOk = true;
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { if (storageOk) toast('This browser is not saving changes. Back up your data before closing.'); storageOk = false; } }
+const P = () => S.projects.find(p => p.id === S.current) || S.projects[0];
+const filters = { q: '', type: '' };
+
+// ---------- render ----------
+function render() {
+  const p = P();
+  if (p && S.current !== p.id) S.current = p.id;
+  $('#plist').innerHTML = S.projects.map(x => `<button class="pitem" data-pid="${x.id}" aria-current="${x === p}"><span class="key">${esc(x.key)}</span><span class="nm">${esc(x.name)}</span></button>`).join('')
+    || '<div class="note">No projects yet.</div>';
+  const main = $('#main');
+  if (!p) { main.innerHTML = `<div class="blank"><h2>Start your first project</h2><p>A project holds a plan of dated tasks, shown as a Gantt chart, and a board of tickets.</p><button class="btn primary" data-act="new-project">Create a project</button></div>`; return; }
+  const total = p.tasks.reduce((a, t) => a + dur(t), 0);
+  const pct = total ? Math.round(p.tasks.reduce((a, t) => a + dur(t) * (t.progress || 0), 0) / total) : 0;
+  const open = p.tickets.filter(t => t.status !== 'done').length;
+  const span = p.tasks.length ? `${fmt(Math.min(...p.tasks.map(t => d2n(t.start))))} – ${fmt(Math.max(...p.tasks.map(t => d2n(t.end))), { month: 'short', day: 'numeric', year: 'numeric' })}` : 'No dates yet';
+  main.innerHTML = `
+    <div class="phead">
+      <div style="min-width:0">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h1>${esc(p.name)}</h1><button class="btn ghost small" data-act="edit-project">Edit</button></div>
+        ${p.description ? `<p class="desc">${esc(p.description)}</p>` : ''}
+      </div>
+      <div class="stats">
+        <div class="stat"><b>${pct}%</b><span>Complete</span><div class="meter"><i style="width:${pct}%"></i></div></div>
+        <div class="stat"><b>${p.tasks.length}</b><span>Tasks</span></div>
+        <div class="stat"><b>${open}</b><span>Open tickets</span></div>
+        <div class="stat"><b class="mono" style="font-size:13px;line-height:27px">${span}</b><span>Timeline</span></div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-view="gantt" aria-selected="${p.view !== 'board'}">Plan &amp; Gantt</button>
+        <button role="tab" data-view="board" aria-selected="${p.view === 'board'}">Tickets</button>
+      </div>
+      <div class="tools">${p.view === 'board' ? `
+        <input class="input" id="fq" type="search" placeholder="Filter tickets" value="${esc(filters.q)}" style="width:170px">
+        <select class="input" id="ftype"><option value="">All types</option>${TYPES.map(t => `<option ${filters.type === t ? 'selected' : ''} value="${t}">${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select>
+        <button class="btn primary" data-act="new-ticket">+ Ticket</button>` : `
+        <div class="seg" aria-label="Zoom">${Object.keys(ZOOM).map(z => `<button data-zoom="${z}" aria-pressed="${(p.zoom || 'day') === z}">${z[0].toUpperCase() + z.slice(1)}</button>`).join('')}</div>
+        <button class="btn" data-act="scroll-today">Today</button>
+        <button class="btn primary" data-act="new-task">+ Task</button>`}
+      </div>
+    </div>
+    <div id="view"></div>`;
+  if (p.view === 'board') renderBoard(p); else renderGantt(p);
+}
+
+function renderGantt(p) {
+  const view = $('#view');
+  if (!p.tasks.length) { view.innerHTML = `<div class="blank"><h2>No tasks in this plan</h2><p>Add tasks with start and end dates. They appear here as bars you can drag to reschedule.</p><button class="btn primary" data-act="new-task">Add the first task</button></div>`; return; }
+  const dw = ZOOM[p.zoom || 'day'];
+  const LEFT = innerWidth < 760 ? 150 : 250;
+  const T = todayN();
+  let min = Math.min(T, ...p.tasks.map(t => d2n(t.start))) - 3;
+  let max = Math.max(T, ...p.tasks.map(t => d2n(t.end))) + 14;
+  const minDays = Math.ceil(1100 / dw);
+  if (max - min + 1 < minDays) max = min + minDays - 1;
+  const days = max - min + 1, W = days * dw, H = (p.tasks.length + 1) * RH;
+  const X = n => (n - min) * dw;
+
+  let scale = '', grid = '';
+  for (let n = min; n <= max; n++) {
+    const dt = new Date(n * DAY), dom = dt.getUTCDate(), wd = dow(n);
+    if (dom === 1 || n === min) scale += `<div class="g-mon" style="left:${X(n)}px">${fmt(n, { month: dw < 10 ? 'short' : 'long', year: 'numeric' })}</div>`;
+    if (dw >= 30) {
+      scale += `<div class="g-day${wd === 1 ? ' wk' : ''}${n === T ? ' now' : ''}" style="left:${X(n)}px;width:${dw}px">${dom}</div>`;
+      grid += `<div class="g-line" style="left:${X(n)}px"></div>`;
+      if (wd === 0 || wd === 6) grid += `<div class="g-wkend" style="left:${X(n)}px;width:${dw}px"></div>`;
+    } else if (wd === 1) {
+      if (dw >= 10) scale += `<div class="g-day wk" style="left:${X(n) - 10}px;width:24px">${dom}</div>`;
+      grid += `<div class="g-line" style="left:${X(n)}px"></div>`;
+    }
+  }
+  p.tasks.forEach((_, i) => grid += `<div class="g-rowline" style="top:${(i + 1) * RH - 1}px"></div>`);
+
+  const rowOf = Object.fromEntries(p.tasks.map((t, i) => [t.id, i]));
+  let bars = '', arrows = '';
+  p.tasks.forEach((t, i) => {
+    const s = d2n(t.start), e = d2n(t.end), y = i * RH + (RH - 22) / 2;
+    const cls = ['bar', t.milestone ? 'ms' : '', (t.progress || 0) >= 100 ? 'done' : ''].join(' ');
+    const label = t.milestone ? esc(t.name) : `${esc(t.name)}${t.progress ? ` · ${t.progress}%` : ''}`;
+    bars += t.milestone
+      ? `<div class="${cls}" data-tid="${t.id}" style="left:${X(s) + dw / 2 - 9}px;top:${y + 2}px" title="${esc(t.name)}"><span class="lbl">${label}</span></div>`
+      : `<div class="${cls}" data-tid="${t.id}" style="left:${X(s)}px;width:${(e - s + 1) * dw}px;top:${y}px" title="${esc(t.name)}"><div class="fill" style="width:${t.progress || 0}%"></div><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div><span class="lbl">${label}</span></div>`;
+    (t.deps || []).forEach(did => {
+      const d = p.tasks[rowOf[did]]; if (!d) return;
+      const x1 = d.milestone ? X(d2n(d.end)) + dw / 2 + 9 : X(d2n(d.end) + 1), y1 = rowOf[did] * RH + RH / 2;
+      const x2 = t.milestone ? X(s) + dw / 2 - 12 : X(s), y2 = i * RH + RH / 2;
+      const dir = y2 > y1 ? 1 : -1;
+      arrows += x2 - x1 >= 12
+        ? `<path d="M${x1} ${y1} H${x1 + 6} V${y2} H${x2 - 1}" marker-end="url(#ah)"/>`
+        : `<path d="M${x1} ${y1} H${x1 + 6} V${y2 - dir * RH / 2} H${x2 - 8} V${y2} H${x2 - 1}" marker-end="url(#ah)"/>`;
+    });
+  });
+  const today = T >= min && T <= max ? `<div class="g-today" style="left:${X(T) + dw / 2 - 1}px"></div>` : '';
+  const todayTag = dw < 30 && T >= min && T <= max ? `<div class="g-today-tag" style="left:${X(T) + dw / 2}px;top:auto;bottom:-1px">TODAY</div>` : '';
+
+  view.innerHTML = `
+    <div class="gantt" id="gantt" style="--rh:${RH}px">
+      <div class="g-inner" style="width:${LEFT + W}px">
+        <div class="g-head"><div class="g-corner label" style="width:${LEFT}px">Task</div><div class="g-scale" style="width:${W}px">${scale}${todayTag}</div></div>
+        <div class="g-rows">
+          <div class="g-names" style="width:${LEFT}px">
+            ${p.tasks.map(t => `<div class="g-name" data-edit-task="${t.id}" tabindex="0"><div class="t">${t.milestone ? '◆ ' : ''}${esc(t.name)}</div><div class="d">${t.milestone ? fmt(d2n(t.start)) : `${fmt(d2n(t.start))} – ${fmt(d2n(t.end))} · ${dur(t)}d`}</div></div>`).join('')}
+            <div class="g-add"><button class="btn ghost small" data-act="new-task">+ Add task</button></div>
+          </div>
+          <div class="g-body" id="gbody" style="width:${W}px;height:${H}px">
+            ${grid}${today}
+            <svg class="g-svg" width="${W}" height="${H}"><defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z"/></marker></defs>${arrows}</svg>
+            ${bars}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  const g = $('#gantt');
+  if (p._scroll != null) g.scrollLeft = p._scroll;
+  else g.scrollLeft = Math.max(0, X(T) - (g.clientWidth - LEFT) / 4);
+  g.addEventListener('scroll', () => { p._scroll = g.scrollLeft; }, { passive: true });
+  g._ctx = { min, dw, X, LEFT };
+  bindBars(p, g);
+}
+
+function bindBars(p, g) {
+  const { dw } = g._ctx;
+  g.querySelectorAll('.bar').forEach(bar => {
+    bar.addEventListener('pointerdown', ev => {
+      if (ev.button !== 0) return;
+      const t = p.tasks.find(x => x.id === bar.dataset.tid);
+      const mode = t.milestone ? 'move' : (ev.target.dataset.h || 'move');
+      const s0 = d2n(t.start), e0 = d2n(t.end), x0 = ev.clientX, left0 = parseFloat(bar.style.left), w0 = parseFloat(bar.style.width) || 0;
+      let ds = 0, de = 0, moved = false, tip;
+      bar.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+      const move = e => {
+        const dd = Math.round((e.clientX - x0) / dw);
+        if (Math.abs(e.clientX - x0) > 3) moved = true;
+        if (!moved) return;
+        bar.classList.add('dragging');
+        if (mode === 'move') { ds = de = dd; }
+        else if (mode === 'l') { ds = Math.min(dd, e0 - s0); de = 0; }
+        else { de = Math.max(dd, s0 - e0); ds = 0; }
+        bar.style.left = left0 + ds * dw + 'px';
+        if (!t.milestone) bar.style.width = w0 + (de - ds) * dw + 'px';
+        tip = tip || document.body.appendChild(Object.assign(document.createElement('div'), { className: 'drag-tip' }));
+        tip.textContent = t.milestone ? fmt(s0 + ds) : `${fmt(s0 + ds)} – ${fmt(e0 + de)} · ${e0 + de - (s0 + ds) + 1}d`;
+        tip.style.left = e.clientX + 12 + 'px'; tip.style.top = e.clientY + 14 + 'px';
+      };
+      const up = () => {
+        bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up);
+        tip && tip.remove();
+        if (!moved) return openTask(t);
+        if (ds || de) { t.start = n2d(s0 + ds); t.end = n2d(t.milestone ? s0 + ds : e0 + de); save(); }
+        render();
+      };
+      bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
+    });
+  });
+}
+
+function renderBoard(p) {
+  const q = filters.q.trim().toLowerCase();
+  const list = p.tickets.filter(t => (!filters.type || t.type === filters.type) && (!q || `${p.key}-${t.num} ${t.title} ${t.description}`.toLowerCase().includes(q)));
+  const T = todayN(), pr = x => PRIORITIES.indexOf(x.priority);
+  $('#view').innerHTML = `<div class="board">${STATUSES.map(([st, label]) => {
+    const cards = list.filter(t => t.status === st).sort((a, b) => pr(b) - pr(a) || a.num - b.num);
+    return `<section class="col" data-status="${st}">
+      <div class="col-h"><h3>${label}<span class="n">${cards.length}</span></h3><button class="btn ghost small" data-new-in="${st}" aria-label="New ticket in ${label}">+</button></div>
+      ${cards.map(t => {
+        const task = p.tasks.find(x => x.id === t.taskId);
+        const late = t.due && t.status !== 'done' && d2n(t.due) < T;
+        return `<button class="card" draggable="true" data-tk="${t.id}">
+          <div class="top"><span class="k">${esc(p.key)}-${t.num}</span><span class="pill ${t.priority}">${t.priority}</span></div>
+          <div class="ti">${esc(t.title)}</div>
+          <div class="meta"><span class="tag ${t.type}">${t.type}</span>${t.due ? `<span class="due mono${late ? ' late' : ''}">${late ? 'Overdue · ' : 'Due '}${fmt(d2n(t.due))}</span>` : ''}${task ? `<span>↳ ${esc(task.name)}</span>` : ''}</div>
+        </button>`;
+      }).join('') || `<div class="empty">${q || filters.type ? 'No matching tickets' : 'Drop tickets here'}</div>`}
+    </section>`;
+  }).join('')}</div>`;
+  const board = $('.board');
+  board.addEventListener('dragstart', e => { const c = e.target.closest('.card'); if (!c) return; e.dataTransfer.setData('text/plain', c.dataset.tk); e.dataTransfer.effectAllowed = 'move'; c.classList.add('dragging'); });
+  board.addEventListener('dragend', e => e.target.closest('.card')?.classList.remove('dragging'));
+  board.querySelectorAll('.col').forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', e => { if (!col.contains(e.relatedTarget)) col.classList.remove('over'); });
+    col.addEventListener('drop', e => {
+      e.preventDefault(); col.classList.remove('over');
+      const t = p.tickets.find(x => x.id === e.dataTransfer.getData('text/plain'));
+      if (t && t.status !== col.dataset.status) { t.status = col.dataset.status; save(); render(); }
+    });
+  });
+}
+
+// ---------- modals ----------
+function modal(html, onReady) {
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="scrim" id="scrim"><form class="modal" id="mform" novalidate>${html}</form></div>`;
+  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', key); };
+  const key = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', key);
+  $('#scrim').addEventListener('mousedown', e => { if (e.target.id === 'scrim') close(); });
+  root.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+  onReady && onReady($('#mform'), close);
+  setTimeout(() => { const f = root.querySelector('input:not([type=hidden]):not([type=checkbox]), textarea'); f && f.focus(); }, 0);
+}
+// Two-step delete button: first click arms it, second click confirms.
+function armDelete(btn, fn) {
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (btn.dataset.armed) return fn();
+    btn.dataset.armed = '1'; btn.textContent = 'Click again to delete';
+  });
+}
+const field = (label, inner, full) => `<label class="field${full ? ' full' : ''}"><span>${label}</span>${inner}</label>`;
+const opts = (arr, cur) => arr.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+
+function openProject(p) {
+  const isNew = !p;
+  modal(`<h2>${isNew ? 'New project' : 'Edit project'}</h2>
+    <div class="fgrid">
+      ${field('Name', `<input class="input" id="pf-name" required value="${esc(p?.name)}">`)}
+      ${field('Ticket prefix', `<input class="input mono" id="pf-key" maxlength="6" value="${esc(p?.key)}" placeholder="e.g. WEB">`)}
+      ${field('Description', `<textarea class="input" id="pf-desc">${esc(p?.description)}</textarea>`, true)}
+    </div>
+    <div class="mfoot">${isNew ? '' : '<button type="button" class="btn danger" id="pf-del">Delete project</button>'}
+      <div class="r"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${isNew ? 'Create project' : 'Save'}</button></div></div>`,
+  (f, close) => {
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = $('#pf-name').value.trim(); if (!name) return $('#pf-name').focus();
+      const key = ($('#pf-key').value.trim() || name.split(/\s+/).map(w => w[0]).join('').slice(0, 4) || 'PRJ').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'PRJ';
+      if (isNew) { const np = { id: uid(), name, key, description: $('#pf-desc').value.trim(), tasks: [], tickets: [], seq: 0, view: 'gantt', zoom: 'day' }; S.projects.push(np); S.current = np.id; }
+      else Object.assign(p, { name, key, description: $('#pf-desc').value.trim() });
+      save(); close(); render();
+    });
+    armDelete($('#pf-del'), () => { S.projects = S.projects.filter(x => x !== p); S.current = S.projects[0]?.id; save(); close(); render(); toast('Project deleted'); });
+  });
+}
+
+function openTask(t) {
+  const p = P(), isNew = !t, T = todayN();
+  const lastEnd = p.tasks.length ? Math.max(...p.tasks.map(x => d2n(x.end))) : T - 1;
+  t = t || { id: uid(), name: '', start: n2d(Math.max(T, lastEnd + 1)), end: n2d(Math.max(T, lastEnd + 1) + 4), progress: 0, deps: [], notes: '' };
+  const others = p.tasks.filter(x => x.id !== t.id);
+  const linked = p.tickets.filter(x => x.taskId === t.id);
+  const idx = p.tasks.indexOf(t);
+  modal(`<h2>${isNew ? 'New task' : 'Edit task'}</h2>
+    <div class="fgrid">
+      ${field('Task name', `<input class="input" id="tf-name" required value="${esc(t.name)}">`, true)}
+      ${field('Start', `<input class="input" type="date" id="tf-start" value="${t.start}">`)}
+      ${field('End', `<input class="input" type="date" id="tf-end" value="${t.end}">`)}
+      ${field(`Progress <output id="tf-pv" class="mono">${t.progress || 0}%</output>`, `<input type="range" id="tf-prog" min="0" max="100" step="5" value="${t.progress || 0}">`)}
+      <label class="field" style="flex-direction:row;align-items:center;gap:8px;padding-top:18px"><input type="checkbox" id="tf-ms" ${t.milestone ? 'checked' : ''}> Milestone (single day)</label>
+      ${others.length ? field('Starts after', `<div class="deps">${others.map(o => `<label><input type="checkbox" value="${o.id}" ${(t.deps || []).includes(o.id) ? 'checked' : ''}> ${esc(o.name)}</label>`).join('')}</div>`, true) : ''}
+      ${field('Notes', `<textarea class="input" id="tf-notes">${esc(t.notes)}</textarea>`, true)}
+    </div>
+    ${linked.length ? `<p class="note">${linked.length} linked ticket${linked.length > 1 ? 's' : ''}: ${linked.map(x => `${esc(p.key)}-${x.num}`).join(', ')}</p>` : ''}
+    <p class="note" id="tf-err" hidden></p>
+    <div class="mfoot">
+      ${isNew ? '' : `<div style="display:flex;gap:6px"><button type="button" class="btn danger" id="tf-del">Delete</button><button type="button" class="btn small" id="tf-up" ${idx <= 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button type="button" class="btn small" id="tf-down" ${idx >= p.tasks.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button></div>`}
+      <div class="r"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${isNew ? 'Add task' : 'Save'}</button></div>
+    </div>`,
+  (f, close) => {
+    $('#tf-prog').addEventListener('input', e => $('#tf-pv').textContent = e.target.value + '%');
+    const swap = d => { const j = idx + d; [p.tasks[idx], p.tasks[j]] = [p.tasks[j], p.tasks[idx]]; save(); close(); render(); };
+    $('#tf-up')?.addEventListener('click', () => swap(-1));
+    $('#tf-down')?.addEventListener('click', () => swap(1));
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = $('#tf-name').value.trim(), s = $('#tf-start').value, ms = $('#tf-ms').checked;
+      let en = ms ? s : $('#tf-end').value;
+      const err = m => { const el = $('#tf-err'); el.textContent = m; el.hidden = false; el.style.color = 'var(--p-urgent)'; };
+      if (!name) return err('Give the task a name.');
+      if (!s || !en) return err('Pick a start and an end date.');
+      if (d2n(en) < d2n(s)) return err('The end date is before the start date. Move one of them.');
+      Object.assign(t, { name, start: s, end: en, milestone: ms, progress: +$('#tf-prog').value, notes: $('#tf-notes').value.trim(),
+        deps: [...f.querySelectorAll('.deps input:checked')].map(i => i.value) });
+      if (isNew) p.tasks.push(t);
+      save(); close(); render();
+    });
+    armDelete($('#tf-del'), () => {
+      p.tasks = p.tasks.filter(x => x !== t);
+      p.tasks.forEach(x => x.deps = (x.deps || []).filter(d => d !== t.id));
+      p.tickets.forEach(x => { if (x.taskId === t.id) x.taskId = ''; });
+      save(); close(); render(); toast('Task deleted');
+    });
+  });
+}
+
+function openTicket(t, status) {
+  const p = P(), isNew = !t;
+  t = t || { id: uid(), num: 0, title: '', status: status || 'todo', priority: 'medium', type: 'task', taskId: '', due: '', description: '', created: n2d(todayN()) };
+  const cap = s => s[0].toUpperCase() + s.slice(1);
+  modal(`<h2>${isNew ? 'New ticket' : `<span class="mono" style="color:var(--muted);font-size:14px">${esc(p.key)}-${t.num}</span><br>Edit ticket`}</h2>
+    <div class="fgrid">
+      ${field('Title', `<input class="input" id="kf-title" required value="${esc(t.title)}">`, true)}
+      ${field('Status', `<select class="input" id="kf-status">${opts(STATUSES, t.status)}</select>`)}
+      ${field('Priority', `<select class="input" id="kf-pri">${opts(PRIORITIES.map(x => [x, cap(x)]), t.priority)}</select>`)}
+      ${field('Type', `<select class="input" id="kf-type">${opts(TYPES.map(x => [x, cap(x)]), t.type)}</select>`)}
+      ${field('Due date', `<input class="input" type="date" id="kf-due" value="${t.due || ''}">`)}
+      ${field('Part of task', `<select class="input" id="kf-task"><option value="">None</option>${opts(p.tasks.map(x => [x.id, x.name]), t.taskId)}</select>`, true)}
+      ${field('Description', `<textarea class="input" id="kf-desc">${esc(t.description)}</textarea>`, true)}
+    </div>
+    <p class="note" id="kf-err" hidden></p>
+    <div class="mfoot">${isNew ? '' : '<button type="button" class="btn danger" id="kf-del">Delete</button>'}
+      <div class="r"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${isNew ? 'Create ticket' : 'Save'}</button></div></div>`,
+  (f, close) => {
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      const title = $('#kf-title').value.trim();
+      if (!title) { const el = $('#kf-err'); el.textContent = 'Give the ticket a title.'; el.hidden = false; el.style.color = 'var(--p-urgent)'; return; }
+      Object.assign(t, { title, status: $('#kf-status').value, priority: $('#kf-pri').value, type: $('#kf-type').value, due: $('#kf-due').value, taskId: $('#kf-task').value, description: $('#kf-desc').value.trim() });
+      if (isNew) { p.seq = (p.seq || 0) + 1; t.num = p.seq; p.tickets.push(t); }
+      save(); close(); render();
+    });
+    armDelete($('#kf-del'), () => { p.tickets = p.tickets.filter(x => x !== t); save(); close(); render(); toast('Ticket deleted'); });
+  });
+}
+
+function openExport() {
+  const json = JSON.stringify({ ...S, projects: S.projects.map(({ _scroll, ...p }) => p) }, null, 2);
+  const name = `project-management-central-${n2d(todayN())}.json`;
+  modal(`<h2>Back up your data</h2>
+    <p class="note">Your projects are saved in this browser only. Download a backup now and then, or to move your data to another computer, and use Restore there.</p>
+    <textarea class="input mono" id="ex-json" readonly style="min-height:160px;font-size:11px">${esc(json)}</textarea>
+    <div class="mfoot"><span class="note mono">${(json.length / 1024).toFixed(1)} KB</span><div class="r">
+      <button type="button" class="btn" id="ex-copy">Copy</button>
+      <button type="button" class="btn primary" id="ex-dl">Download ${esc(name)}</button></div></div>`,
+  () => {
+    $('#ex-dl').addEventListener('click', () => {
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([json], { type: 'application/json' })), download: name });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    });
+    $('#ex-copy').addEventListener('click', () => {
+      const ta = $('#ex-json');
+      navigator.clipboard?.writeText(json).then(() => toast('Backup copied'), () => { ta.focus(); ta.select(); toast('Press Ctrl+C or ⌘C to copy'); }) ?? (ta.select(), toast('Press Ctrl+C or ⌘C to copy'));
+    });
+  });
+}
+
+function importData(text) {
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return toast('That file is not a valid backup.'); }
+  if (!data || !Array.isArray(data.projects)) return toast('That file is not a Project Management Central backup.');
+  modal(`<h2>Restore this backup?</h2>
+    <p>It holds ${data.projects.length} project${data.projects.length === 1 ? '' : 's'}: ${esc(data.projects.map(p => p.name).join(', '))}.</p>
+    <p class="note">Restoring replaces everything currently in this browser.</p>
+    <div class="mfoot"><div class="r"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Replace and restore</button></div></div>`,
+  (f, close) => f.addEventListener('submit', e => {
+    e.preventDefault();
+    data.projects.forEach(p => { p.tasks ||= []; p.tickets ||= []; p.seq ||= Math.max(0, ...p.tickets.map(t => t.num || 0)); });
+    S = data; S.current = S.projects.some(p => p.id === S.current) ? S.current : S.projects[0]?.id;
+    save(); close(); render(); toast('Backup restored');
+  }));
+}
+
+let toastTimer;
+function toast(msg) {
+  document.querySelector('.toast')?.remove();
+  const el = document.body.appendChild(Object.assign(document.createElement('div'), { className: 'toast', textContent: msg, role: 'status' }));
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 3200);
+}
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  const el = e.target.closest('button, [data-edit-task]'); if (!el) return;
+  const p = P(), d = el.dataset;
+  if (d.pid) { S.current = d.pid; filters.q = ''; filters.type = ''; save(); render(); }
+  else if (d.view) { p.view = d.view; save(); render(); }
+  else if (d.zoom) { p.zoom = d.zoom; p._scroll = null; save(); render(); }
+  else if (d.editTask) openTask(p.tasks.find(t => t.id === d.editTask));
+  else if (d.tk) openTicket(p.tickets.find(t => t.id === d.tk));
+  else if (d.newIn) openTicket(null, d.newIn);
+  else if (d.act === 'new-task') openTask();
+  else if (d.act === 'new-ticket') openTicket();
+  else if (d.act === 'edit-project') openProject(p);
+  else if (d.act === 'new-project') openProject();
+  else if (d.act === 'scroll-today') { const g = $('#gantt'); if (g) { const { X, LEFT } = g._ctx; g.scrollTo({ left: Math.max(0, X(todayN()) - (g.clientWidth - LEFT) / 4), behavior: 'smooth' }); } }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset?.editTask) openTask(P().tasks.find(t => t.id === e.target.dataset.editTask)); });
+document.addEventListener('input', e => {
+  if (e.target.id === 'fq') { filters.q = e.target.value; renderBoard(P()); }
+  if (e.target.id === 'ftype') { filters.type = e.target.value; renderBoard(P()); }
+});
+$('#newProject').addEventListener('click', () => openProject());
+$('#exportBtn').addEventListener('click', openExport);
+$('#importBtn').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', e => {
+  const file = e.target.files[0]; if (!file) return;
+  const r = new FileReader(); r.onload = () => importData(r.result); r.readAsText(file); e.target.value = '';
+});
+let rw; addEventListener('resize', () => { clearTimeout(rw); rw = setTimeout(() => { if (P()?.view !== 'board') render(); }, 200); });
+
+render();
+})();
+</script>
+</body>
+</html>
