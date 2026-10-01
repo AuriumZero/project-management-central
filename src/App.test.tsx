@@ -147,6 +147,23 @@ describe('App', () => {
     ])
   })
 
+  it('moves rows with the arrow keys on their ID, in the plan and the risk register', async () => {
+    const user = renderApp()
+    const grip = screen.getByRole('button', { name: /^Move Visual design:/ })
+    grip.focus()
+    await user.keyboard('{ArrowUp}')
+    const design = loadState()!.projects[0].tasks.filter((t) => t.parentId && t.parentId === loadState()!.projects[0].tasks.find((x) => x.name === 'Design')!.id)
+    expect(design.map((t) => t.name)).toEqual(['Visual design', 'Wireframes', 'Design review'])
+    expect(screen.getByRole('button', { name: /^Move Visual design:/ })).toHaveFocus()
+
+    await user.click(screen.getByRole('tab', { name: 'Risks & issues' }))
+    screen.getByRole('button', { name: /^Move Old blog URLs/ }).focus()
+    await user.keyboard('{ArrowDown}')
+    expect(loadState()!.projects[0].risks.map((r) => r.name)[2]).toBe('Old blog URLs break on launch')
+    await user.click(screen.getByRole('button', { name: /Impact/ }))
+    expect(screen.getByRole('button', { name: /^Move Old blog URLs/ })).toBeDisabled()
+  })
+
   it('refuses an edit that ends before it starts', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))

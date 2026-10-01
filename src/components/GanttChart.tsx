@@ -28,6 +28,13 @@ interface GanttChartProps {
   ref?: Ref<GanttHandle>
 }
 
+/** Where a dragged row would land, and the line drawn there (`y` from the top of the names pane). */
+interface DropSlot {
+  parentId: string
+  before: string | null
+  y: number
+}
+
 /** The project summary row's id; it isn't a stored task. */
 export const PROJECT_ROW = '__project'
 
@@ -171,6 +178,88 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
   }, [focusId, tasks])
 
   useImperativeHandle(ref, () => ({ scrollToToday, addTask }))
+
+  // Drag a row by its ID to reorder it. A parent moves with its subtasks among
+  // the top-level tasks; a subtask moves within or between parents' groups.
+  const names = useRef<HTMLDivElement>(null)
+  const [rowDrag, setRowDrag] = useState<{ id: string; slot: DropSlot | null } | null>(null)
+  const [focusGrip, setFocusGrip] = useState<string | null>(null)
+
+  const dropSlots = (task: Task): DropSlot[] => {
+    const pane = names.current
+    if (!pane) return []
+    const base = pane.getBoundingClientRect().top
+    const edge = (id: string, side: 'top' | 'bottom') => (pane.querySelector(`[data-id="${id}"]`)?.getBoundingClientRect()[side] ?? base) - base
+    if (!task.parentId) {
+      const tops = visible.filter((r) => !r.depth)
+      return [
+        ...tops.map((r) => ({ parentId: '', before: r.task.id, y: edge(r.task.id, 'top') })),
+        { parentId: '', before: null, y: edge(visible.at(-1)!.task.id, 'bottom') },
+      ]
+    }
+    return visible.filter((r) => r.hasChildren && !r.task.collapsed).flatMap((p) => {
+      const kids = visible.filter((r) => r.task.parentId === p.task.id)
+      return [
+        ...kids.map((k) => ({ parentId: p.task.id, before: k.task.id, y: edge(k.task.id, 'top') })),
+        { parentId: p.task.id, before: null, y: edge(kids.at(-1)!.task.id, 'bottom') },
+      ]
+    })
+  }
+
+  const startRowDrag = (e: ReactPointerEvent<HTMLButtonElement>, task: Task) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const grip = e.currentTarget
+    grip.setPointerCapture(e.pointerId)
+    let y = e.clientY
+    let slot: DropSlot | null = null
+    let frame = 0
+    const place = () => {
+      const pane = names.current
+      if (!pane) return
+      const at = y - pane.getBoundingClientRect().top
+      slot = dropSlots(task).reduce<DropSlot | null>((best, s) => (!best || Math.abs(s.y - at) < Math.abs(best.y - at) ? s : best), null)
+      setRowDrag({ id: task.id, slot })
+    }
+    // Scrolls the plan while the pointer is held near its top or bottom edge.
+    const tick = () => {
+      const el = scroller.current
+      if (el) {
+        const r = el.getBoundingClientRect()
+        const step = y < r.top + 70 ? -12 : y > r.bottom - 30 ? 12 : 0
+        if (step) { el.scrollTop += step; place() }
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    const onMove = (ev: PointerEvent) => { y = ev.clientY; place() }
+    const onUp = () => {
+      cancelAnimationFrame(frame)
+      grip.removeEventListener('pointermove', onMove)
+      grip.removeEventListener('pointerup', onUp)
+      grip.removeEventListener('pointercancel', onCancel)
+      setRowDrag(null)
+      if (slot) dispatch({ type: 'reorderTask', id: task.id, parentId: slot.parentId, before: slot.before })
+    }
+    const onCancel = () => { slot = null; onUp() }
+    grip.addEventListener('pointermove', onMove)
+    grip.addEventListener('pointerup', onUp)
+    grip.addEventListener('pointercancel', onCancel)
+    frame = requestAnimationFrame(tick)
+    place()
+  }
+
+  // Arrow keys on a row's ID move it up or down among its siblings.
+  const moveRow = (e: KeyboardEvent<HTMLButtonElement>, task: Task) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    dispatch({ type: 'moveTask', id: task.id, by: e.key === 'ArrowUp' ? -1 : 1 })
+    setFocusGrip(task.id)
+  }
+  useEffect(() => {
+    if (!focusGrip) return
+    names.current?.querySelector<HTMLButtonElement>(`[data-id="${focusGrip}"] .grip`)?.focus()
+    setFocusGrip(null)
+  }, [focusGrip, tasks])
 
   // Pasting cells copied from Excel fills this row and the ones below, column by
   // column from where you pasted, and adds tasks when it runs past the end, so a
@@ -364,7 +453,8 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
           </div>
         </div>
         <div className="g-rows">
-          <div className="g-names" style={{ width: left }}>
+          <div className="g-names" style={{ width: left }} ref={names}>
+           {rowDrag?.slot && <div className="drop-line" style={{ top: rowDrag.slot.y - 1, left: rowDrag.slot.parentId ? col.id + 18 : 0 }} aria-hidden="true" />}
            <div
              className="g-clip"
              role="grid"
@@ -392,6 +482,9 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
                 toast={toast}
                 onEdit={() => onEditTask(row.task)}
                 onAddSubtask={() => addTask(row.task.id)}
+                dragging={rowDrag?.id === row.task.id}
+                onGrab={(e) => startRowDrag(e, row.task)}
+                onGripKey={(e) => moveRow(e, row.task)}
               />
             ))}
             <div className="g-add">
@@ -520,9 +613,12 @@ interface TaskRowProps {
   toast: (message: string) => void
   onEdit: () => void
   onAddSubtask: () => void
+  dragging: boolean
+  onGrab: (e: ReactPointerEvent<HTMLButtonElement>) => void
+  onGripKey: (e: KeyboardEvent<HTMLButtonElement>) => void
 }
 
-function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, dispatch, toast, onEdit, onAddSubtask }: TaskRowProps) {
+function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, dispatch, toast, onEdit, onAddSubtask, dragging, onGrab, onGripKey }: TaskRowProps) {
   const { task, depth, hasChildren, num } = row
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -574,8 +670,16 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
   }
 
   return (
-    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}`} role="row" data-row={num} data-id={task.id} data-parent={task.parentId}>
-      <span className="c-id mono" role="gridcell">{num}</span>
+    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}${dragging ? ' row-dragging' : ''}`} role="row" data-row={num} data-id={task.id} data-parent={task.parentId}>
+      <span className="c-id mono" role="gridcell">
+        <button
+          className="grip"
+          onPointerDown={onGrab}
+          onKeyDown={onGripKey}
+          aria-label={`Move ${name}: drag, or press the up and down arrow keys`}
+          title="Drag to move this row"
+        >{num}</button>
+      </span>
       <span className="c-name" role="gridcell" style={{ paddingLeft: depth * 18 }}>
         {hasChildren ? (
           <button
