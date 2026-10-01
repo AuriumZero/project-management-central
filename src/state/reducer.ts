@@ -16,6 +16,11 @@ export type Action =
   | { type: 'updateTask'; id: string; patch: Partial<Omit<Task, 'id'>> & { days?: number } }
   | { type: 'setWorkWeek'; workWeek: WorkWeek }
   | { type: 'moveTask'; id: string; by: -1 | 1 }
+  /**
+   * Drag to reorder: puts the task before `before` (or last) among the tasks
+   * of `parentId`. A parent moves with its subtasks.
+   */
+  | { type: 'reorderTask'; id: string; parentId: string; before: string | null }
   | { type: 'indentTask'; id: string }
   | { type: 'outdentTask'; id: string }
   | { type: 'toggleCollapse'; id: string }
@@ -27,6 +32,7 @@ export type Action =
   | { type: 'addRisk'; risk: Risk }
   | { type: 'updateRisk'; id: string; patch: Partial<Omit<Risk, 'id'>> }
   | { type: 'deleteRisk'; id: string }
+  | { type: 'reorderRisk'; id: string; before: string | null }
   | { type: 'saveTicket'; ticket: Ticket }
   | { type: 'setTicketStatus'; id: string; status: Status }
   | { type: 'deleteTicket'; id: string }
@@ -173,6 +179,21 @@ export function reducer(state: AppState, action: Action): AppState {
         return other ? swap(tasks, task, other) : tasks
       })
 
+    case 'reorderTask':
+      return withTasks(state, (tasks) => {
+        const task = tasks.find((t) => t.id === action.id)
+        if (!task || action.before === task.id) return tasks
+        // Parents stay top level, and subtasks only move into a parent's group.
+        const parent = tasks.find((t) => t.id === action.parentId)
+        if (isParent(tasks, task.id) ? action.parentId : action.parentId && (!parent || parent.parentId)) return tasks
+        const rest = tasks.filter((t) => t !== task)
+        const moved: Task = { ...task, parentId: action.parentId }
+        const at = action.before ? rest.findIndex((t) => t.id === action.before) : -1
+        const next = at < 0 ? [...rest, moved] : [...rest.slice(0, at), moved, ...rest.slice(at)]
+        // A task that gains its first subtask this way becomes a parent.
+        return next.map((t) => (t.id === action.parentId && (t.milestone || t.collapsed) ? { ...t, milestone: false, collapsed: false } : t))
+      })
+
     case 'indentTask':
       return withTasks(state, (tasks) => {
         const task = tasks.find((t) => t.id === action.id)
@@ -249,6 +270,15 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'updateRisk':
       return withCurrent(state, (p) => ({ ...p, risks: p.risks.map((r) => (r.id === action.id ? { ...r, ...action.patch } : r)) }))
+
+    case 'reorderRisk':
+      return withCurrent(state, (p) => {
+        const risk = p.risks.find((r) => r.id === action.id)
+        if (!risk || action.before === risk.id) return p
+        const rest = p.risks.filter((r) => r !== risk)
+        const at = action.before ? rest.findIndex((r) => r.id === action.before) : -1
+        return { ...p, risks: at < 0 ? [...rest, risk] : [...rest.slice(0, at), risk, ...rest.slice(at)] }
+      })
 
     case 'deleteRisk':
       return withCurrent(state, (p) => ({ ...p, risks: p.risks.filter((r) => r.id !== action.id) }))

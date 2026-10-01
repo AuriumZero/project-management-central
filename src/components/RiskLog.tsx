@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, Dispatch, KeyboardEvent, Ref } from 'react'
+import type { ClipboardEvent, Dispatch, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
 import { parseClipboard, parsePercent } from '../lib/paste'
 import { makeId } from '../lib/storage'
 import { IMPACTS, RISK_KINDS } from '../lib/types'
@@ -90,8 +90,66 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
     setFocusId(risk.id)
   }
 
+  // Each heading sorts ascending, then descending, then back to your own order.
+  // ID ascending is your own order, so ID goes straight to descending.
   const sortBy = (key: SortKey) =>
-    setSort((s) => (key === 'num' && s?.key === 'num' && s.dir === -1 ? null : { key, dir: s?.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))
+    setSort((s) => {
+      if (key === 'num') return s ? null : { key, dir: -1 }
+      return s?.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : null
+    })
+
+  // Drag a row by its ID to reorder the register. Rows can only be dragged in
+  // your own order, not while sorted by a column.
+  const box = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState<{ id: string; before: string | null; y: number } | null>(null)
+  const [focusGrip, setFocusGrip] = useState<string | null>(null)
+
+  const startDrag = (e: ReactPointerEvent<HTMLButtonElement>, risk: Risk) => {
+    if (e.button !== 0 || sort) return
+    e.preventDefault()
+    const grip = e.currentTarget
+    grip.setPointerCapture(e.pointerId)
+    let target: { before: string | null; y: number } | null = null
+    const place = (clientY: number) => {
+      const base = box.current!.getBoundingClientRect().top
+      const rowsEl = [...box.current!.querySelectorAll<HTMLElement>('tbody tr')]
+      const slots = [
+        ...rowsEl.map((tr) => ({ before: tr.dataset.id!, y: tr.getBoundingClientRect().top - base })),
+        { before: null, y: (rowsEl.at(-1)?.getBoundingClientRect().bottom ?? base) - base },
+      ]
+      const at = clientY - base
+      target = slots.reduce((best, s) => (Math.abs(s.y - at) < Math.abs(best.y - at) ? s : best))
+      setDrag({ id: risk.id, ...target })
+    }
+    const onMove = (ev: PointerEvent) => place(ev.clientY)
+    const onUp = () => {
+      grip.removeEventListener('pointermove', onMove)
+      grip.removeEventListener('pointerup', onUp)
+      grip.removeEventListener('pointercancel', onCancel)
+      setDrag(null)
+      if (target) dispatch({ type: 'reorderRisk', id: risk.id, before: target.before })
+    }
+    const onCancel = () => { target = null; onUp() }
+    grip.addEventListener('pointermove', onMove)
+    grip.addEventListener('pointerup', onUp)
+    grip.addEventListener('pointercancel', onCancel)
+    place(e.clientY)
+  }
+
+  // Arrow keys on a row's ID move it up or down one place.
+  const moveByKey = (e: KeyboardEvent<HTMLButtonElement>, risk: Risk) => {
+    if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || sort) return
+    e.preventDefault()
+    const i = risks.indexOf(risk)
+    if (e.key === 'ArrowUp' && i > 0) dispatch({ type: 'reorderRisk', id: risk.id, before: risks[i - 1].id })
+    if (e.key === 'ArrowDown' && i < risks.length - 1) dispatch({ type: 'reorderRisk', id: risk.id, before: risks[i + 2]?.id ?? null })
+    setFocusGrip(risk.id)
+  }
+  useEffect(() => {
+    if (!focusGrip) return
+    table.current?.querySelector<HTMLButtonElement>(`[data-id="${focusGrip}"] .grip`)?.focus()
+    setFocusGrip(null)
+  }, [focusGrip, risks])
 
   // Pasting cells copied from Excel fills this row and the ones below, column by
   // column from where you pasted, and adds rows when it runs past the end.
@@ -171,7 +229,8 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
   }
 
   return (
-    <div className="risks">
+    <div className="risks" ref={box}>
+      {drag && <div className="drop-line" style={{ top: drag.y - 1, left: 0 }} aria-hidden="true" />}
       <table className="risk-table" ref={table} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Risks and issues">
         <thead>
           <tr>
@@ -187,7 +246,19 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((risk) => <RiskRow key={risk.id} risk={risk} num={numById.get(risk.id)!} dispatch={dispatch} toast={toast} />)}
+          {rows.map((risk) => (
+            <RiskRow
+              key={risk.id}
+              risk={risk}
+              num={numById.get(risk.id)!}
+              dispatch={dispatch}
+              toast={toast}
+              sorted={Boolean(sort)}
+              dragging={drag?.id === risk.id}
+              onGrab={(e) => startDrag(e, risk)}
+              onGripKey={(e) => moveByKey(e, risk)}
+            />
+          ))}
         </tbody>
       </table>
       <div className="g-add">
@@ -197,7 +268,18 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
   )
 }
 
-function RiskRow({ risk, num, dispatch, toast }: { risk: Risk; num: number; dispatch: Dispatch<Action>; toast: (message: string) => void }) {
+interface RiskRowProps {
+  risk: Risk
+  num: number
+  dispatch: Dispatch<Action>
+  toast: (message: string) => void
+  sorted: boolean
+  dragging: boolean
+  onGrab: (e: ReactPointerEvent<HTMLButtonElement>) => void
+  onGripKey: (e: KeyboardEvent<HTMLButtonElement>) => void
+}
+
+function RiskRow({ risk, num, dispatch, toast, sorted, dragging, onGrab, onGripKey }: RiskRowProps) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!armed) return
@@ -214,8 +296,17 @@ function RiskRow({ risk, num, dispatch, toast }: { risk: Risk; num: number; disp
   }
 
   return (
-    <tr data-id={risk.id}>
-      <td className="r-id mono">R{num}</td>
+    <tr data-id={risk.id} className={dragging ? 'row-dragging' : undefined}>
+      <td className="r-id mono">
+        <button
+          className="grip"
+          disabled={sorted}
+          onPointerDown={onGrab}
+          onKeyDown={onGripKey}
+          aria-label={`Move ${risk.name || 'Untitled'}: drag, or press the up and down arrow keys`}
+          title={sorted ? 'Turn sorting off (click the sorted heading until the arrow goes) to move rows' : 'Drag to move this row'}
+        >R{num}</button>
+      </td>
       <td className="r-name">
         <TextCell value={risk.name} label={`Risk ${num}`} onCommit={(v) => v.trim() ? update({ name: v.trim() }) : toast('A risk needs a name.')} />
       </td>

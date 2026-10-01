@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { seedState } from '../lib/storage'
 import type { AppState, Task, Ticket } from '../lib/types'
+import { outline } from '../lib/plan'
 import { currentProject, reducer } from './reducer'
+
+const outlineIds = (s: AppState) => outline(currentProject(s)!.tasks).map((r) => r.task.id)
 
 const empty = (): AppState => reducer({ v: 3, current: undefined, projects: [] },
   { type: 'createProject', project: { id: 'p', name: 'P', key: 'P', description: '', workWeek: 'all' } })
@@ -59,6 +62,36 @@ describe('reducer', () => {
       s = reducer(s, { type: 'updateTask', id: 'b', patch: { end: '2026-10-09' } })
       expect(get(s, 'b')).toMatchObject({ start: '2026-10-03', end: '2026-10-09' })
       expect(get(s, 'b').pin).toBeUndefined()
+    })
+  })
+
+  describe('reordering by drag', () => {
+    const order = (s: AppState) => currentProject(s)!.tasks.map((t) => `${t.id}${t.parentId ? `<${t.parentId}` : ''}`)
+    const plan = () => [task('a'), task('a1', { parentId: 'a' }), task('b'), task('b1', { parentId: 'b' }), task('c')]
+      .reduce((s, t) => reducer(s, { type: 'saveTask', task: t }), empty())
+
+    it('moves a parent with its subtasks among the top-level tasks', () => {
+      const s = reducer(plan(), { type: 'reorderTask', id: 'b', parentId: '', before: 'a' })
+      expect(outlineIds(s)).toEqual(['b', 'b1', 'a', 'a1', 'c'])
+    })
+
+    it('moves a subtask into another parent', () => {
+      const s = reducer(plan(), { type: 'reorderTask', id: 'a1', parentId: 'b', before: 'b1' })
+      expect(outlineIds(s)).toEqual(['a', 'b', 'a1', 'b1', 'c'])
+      expect(order(s)).toContain('a1<b')
+    })
+
+    it('moves a task to the end, and refuses to put a parent inside another', () => {
+      expect(outlineIds(reducer(plan(), { type: 'reorderTask', id: 'a', parentId: '', before: null }))).toEqual(['b', 'b1', 'c', 'a', 'a1'])
+      expect(reducer(plan(), { type: 'reorderTask', id: 'a', parentId: 'b', before: null })).toEqual(plan())
+    })
+
+    it('reorders risks', () => {
+      let s = ['x', 'y', 'z'].reduce((st, id) => reducer(st, { type: 'addRisk', risk: { id, name: id, kind: 'risk', impact: 'low', likelihood: 0, notes: '' } }), empty())
+      s = reducer(s, { type: 'reorderRisk', id: 'z', before: 'x' })
+      expect(currentProject(s)!.risks.map((r) => r.id)).toEqual(['z', 'x', 'y'])
+      s = reducer(s, { type: 'reorderRisk', id: 'z', before: null })
+      expect(currentProject(s)!.risks.map((r) => r.id)).toEqual(['x', 'y', 'z'])
     })
   })
 
