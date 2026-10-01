@@ -3,7 +3,7 @@ import { seedState } from '../lib/storage'
 import type { AppState, Task, Ticket } from '../lib/types'
 import { currentProject, reducer } from './reducer'
 
-const empty = (): AppState => reducer({ v: 2, current: undefined, projects: [] },
+const empty = (): AppState => reducer({ v: 3, current: undefined, projects: [] },
   { type: 'createProject', project: { id: 'p', name: 'P', key: 'P', description: '', workWeek: 'all' } })
 
 const task = (id: string, extra: Partial<Task> = {}): Task =>
@@ -21,8 +21,53 @@ describe('reducer', () => {
   })
 
   it('skips weekends by default in new projects', () => {
-    const s = reducer({ v: 2, current: undefined, projects: [] }, { type: 'createProject', project: { id: 'w', name: 'W', key: 'W', description: '' } })
+    const s = reducer({ v: 3, current: undefined, projects: [] }, { type: 'createProject', project: { id: 'w', name: 'W', key: 'W', description: '' } })
     expect(currentProject(s)!.workWeek).toBe('weekdays')
+  })
+
+  describe('following predecessors', () => {
+    const get = (s: AppState, id: string) => currentProject(s)!.tasks.find((t) => t.id === id)!
+    const two = () => {
+      let s = reducer(empty(), { type: 'saveTask', task: task('a', { start: '2026-10-01', end: '2026-10-02' }) })
+      return reducer(s, { type: 'saveTask', task: task('b', { start: '2026-10-20', end: '2026-10-21' }) })
+    }
+
+    it('moves a task to right after a predecessor you add', () => {
+      const s = reducer(two(), { type: 'updateTask', id: 'b', patch: { deps: [{ id: 'a', type: 'FS', lag: 0 }] } })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-03', end: '2026-10-04' })
+    })
+
+    it('pins a start you type, and a new predecessor unpins it', () => {
+      let s = reducer(two(), { type: 'addLink', from: 'a', to: 'b' })
+      s = reducer(s, { type: 'updateTask', id: 'b', patch: { start: '2026-10-10' } })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-10', pin: '2026-10-10' })
+      s = reducer(s, { type: 'updateTask', id: 'b', patch: { deps: [{ id: 'a', type: 'FS', lag: 2 }] } })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-05' })
+      expect(get(s, 'b').pin).toBeUndefined()
+    })
+
+    it('pins a dragged bar until you unpin it', () => {
+      let s = reducer(two(), { type: 'addLink', from: 'a', to: 'b' })
+      s = reducer(s, { type: 'shiftTask', id: 'b', start: 4, end: 4 })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-07', pin: '2026-10-07' })
+      s = reducer(s, { type: 'unpinTask', id: 'b' })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-03' })
+    })
+
+    it('keeps a typed finish from pinning the start', () => {
+      let s = reducer(two(), { type: 'addLink', from: 'a', to: 'b' })
+      s = reducer(s, { type: 'updateTask', id: 'b', patch: { end: '2026-10-09' } })
+      expect(get(s, 'b')).toMatchObject({ start: '2026-10-03', end: '2026-10-09' })
+      expect(get(s, 'b').pin).toBeUndefined()
+    })
+  })
+
+  it('adds, edits and deletes risks', () => {
+    let s = reducer(empty(), { type: 'addRisk', risk: { id: 'r', name: 'Vendor late', impact: 'high', likelihood: 30, notes: '' } })
+    s = reducer(s, { type: 'updateRisk', id: 'r', patch: { likelihood: 80, notes: 'Chased twice' } })
+    expect(currentProject(s)!.risks).toEqual([{ id: 'r', name: 'Vendor late', impact: 'high', likelihood: 80, notes: 'Chased twice' }])
+    s = reducer(s, { type: 'deleteRisk', id: 'r' })
+    expect(currentProject(s)!.risks).toEqual([])
   })
 
   describe('on a Monday-to-Friday calendar', () => {

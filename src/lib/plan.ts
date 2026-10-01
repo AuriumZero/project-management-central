@@ -177,31 +177,73 @@ export function requiredDelay(pred: Task, succ: Task, dep: Pick<Dependency, 'typ
 }
 
 /**
- * Auto-schedules the plan: tasks are snapped onto working days, successors
- * are pushed later until every link is satisfied, and parents are rolled up
- * from their subtasks. Tasks are never pulled earlier, so slack you add by
- * hand is kept.
+ * The earliest start the links allow for a lowest-level task: its own links,
+ * plus its parent's (a link to a parent applies to every subtask). Null when
+ * nothing links to it.
+ */
+export function linkedStart(tasks: Task[], task: Task, week: WorkWeek = 'all'): number | null {
+  const parent = task.parentId ? tasks.find((p) => p.id === task.parentId) : undefined
+  let best: number | null = null
+  for (const dep of [...task.deps, ...(parent?.deps ?? [])]) {
+    const pred = tasks.find((x) => x.id === dep.id)
+    if (!pred) continue
+    const s = earliestStart(pred, task, dep, week)
+    best = best === null ? s : Math.max(best, s)
+  }
+  return best
+}
+
+const isLeaf = (tasks: Task[], id: string) => !tasks.some((t) => t.parentId === id)
+
+/**
+ * Auto-schedules the plan the way Microsoft Project does by default: a task
+ * with predecessors starts as soon as they allow, moving earlier or later as
+ * they change. A start you set by hand on a linked task (`pin`) works as
+ * "start no earlier than": the task can still be pushed later, but isn't
+ * pulled earlier. Tasks with no links stay where you put them, and parents
+ * are rolled up from their subtasks.
  */
 export function schedule(input: Task[], week: WorkWeek = 'all'): Task[] {
   let tasks = rollup(normalize(sanitize(input), week))
+  // A pin only means something on a linked task.
+  tasks = tasks.map((t) => (t.pin && linkedStart(tasks, t, week) === null ? withoutPin(t) : t))
+  const ids = tasks.filter((t) => isLeaf(tasks, t.id)).map((t) => t.id)
   const limit = tasks.length * 4 + 10
   for (let pass = 0; pass < limit; pass++) {
     let changed = false
-    for (const t of tasks) {
-      for (const dep of t.deps) {
-        const pred = tasks.find((x) => x.id === dep.id)
-        const succ = tasks.find((x) => x.id === t.id)!
-        if (!pred) continue
-        const delay = requiredDelay(pred, succ, dep, week)
-        if (delay > 0) {
-          tasks = rollup(shiftTree(tasks, t.id, delay, week))
-          changed = true
-        }
+    for (const id of ids) {
+      const t = tasks.find((x) => x.id === id)!
+      const linked = linkedStart(tasks, t, week)
+      if (linked === null) continue
+      const placed = placeAt(t, Math.max(linked, t.pin ? toDay(t.pin) : linked), week)
+      if (placed !== t) {
+        tasks = rollup(tasks.map((x) => (x.id === id ? placed : x)))
+        changed = true
       }
     }
     if (!changed) break
   }
   return tasks
+}
+
+export function withoutPin(task: Task): Task {
+  if (!task.pin) return task
+  const { pin: _pin, ...rest } = task
+  return rest
+}
+
+/**
+ * Plans saved before tasks followed their predecessors only ever pushed tasks
+ * later, so a gap after a predecessor was set by hand. This pins those tasks
+ * so upgrading doesn't move anything.
+ */
+export function keepManualStarts(input: Task[], week: WorkWeek): Task[] {
+  const tasks = rollup(normalize(sanitize(input), week))
+  return tasks.map((t) => {
+    if (!isLeaf(tasks, t.id)) return t
+    const linked = linkedStart(tasks, t, week)
+    return linked !== null && toDay(t.start) > linked ? { ...t, pin: t.start } : t
+  })
 }
 
 const LINK_RE = /^(\d+)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+)\s*(?:d|days?)?)?$/i

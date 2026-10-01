@@ -13,7 +13,7 @@ const row = (id: string, start: string, end: string, extra: Partial<ChartRow> = 
 const fs = (id: string): Dependency => ({ id, type: 'FS', lag: 0 })
 
 const project = (tasks: Task[]): Project =>
-  ({ id: 'p', name: 'P', key: 'P', description: '', tasks, tickets: [], seq: 0, view: 'gantt', zoom: 'day', workWeek: 'all' })
+  ({ id: 'p', name: 'P', key: 'P', description: '', tasks, tickets: [], risks: [], seq: 0, view: 'gantt', zoom: 'day', workWeek: 'all' })
 
 describe('projectStats', () => {
   it('weights completion by task length', () => {

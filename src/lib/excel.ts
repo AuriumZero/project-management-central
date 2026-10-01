@@ -1,6 +1,7 @@
 import { isWorkday, workdaysBetween } from './calendar'
 import { dayOfMonth, formatDay, fromDay, toDay, today, weekday } from './dates'
 import { duration, formatPredecessors, formatSuccessors, outline, projectSummary } from './plan'
+import { IMPACTS } from './types'
 import type { Project } from './types'
 import { buildXlsx, colName, excelDate, ref } from './xlsx'
 import type { Cell, CellStyle, Sheet } from './xlsx'
@@ -43,6 +44,13 @@ const STYLES = {
   barSummary: { fill: C.summary },
   milestone: { bold: true, color: C.milestone, align: 'center' },
   legend: { size: 9, color: C.muted },
+  // Risk log.
+  riskText: { underline: C.line, valign: 'top', wrap: true },
+  riskNum: { underline: C.line, valign: 'top', align: 'center' },
+  riskPct: { underline: C.line, valign: 'top', align: 'center', numFmt: '0%' },
+  impactLow: { bold: true, color: '#64748b', underline: C.line, valign: 'top', align: 'center' },
+  impactMedium: { bold: true, color: '#c2410c', underline: C.line, valign: 'top', align: 'center' },
+  impactHigh: { bold: true, color: '#b91c1c', underline: C.line, valign: 'top', align: 'center' },
 } satisfies Record<string, CellStyle>
 
 type StyleName = keyof typeof STYLES
@@ -181,10 +189,30 @@ function daysInMonth(day: number): number {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()
 }
 
-/** The plan as an Excel workbook: a task table, and a Gantt chart drawn with cell colors. */
+function risksSheet(project: Project): Sheet {
+  const impact = { low: 'impactLow', medium: 'impactMedium', high: 'impactHigh' } as const
+  return {
+    name: 'Risks & issues',
+    cols: [6, 40, 10, 12, 70],
+    freeze: { rows: 1, cols: 0 },
+    autoFilter: `A1:E${project.risks.length + 1}`,
+    rows: [
+      ['ID', 'Risk or issue', 'Impact', 'Likelihood', 'Notes'].map((h, i) => cell(h, i === 2 || i === 3 ? 'headCenter' : 'head')),
+      ...project.risks.map((r, i) => [
+        cell(`R${i + 1}`, 'riskNum'),
+        cell(r.name, 'riskText'),
+        cell(IMPACTS.find(([v]) => v === r.impact)?.[1] ?? r.impact, impact[r.impact]),
+        cell(r.likelihood / 100, 'riskPct'),
+        cell(r.notes, 'riskText'),
+      ]),
+    ],
+  }
+}
+
+/** The plan as an Excel workbook: a task table, a Gantt chart drawn with cell colors, and the risk log. */
 export function planWorkbook(project: Project, todayDay = today()): Uint8Array {
   return buildXlsx({
-    sheets: [tasksSheet(project), ganttSheet(project, todayDay)],
+    sheets: [tasksSheet(project), ganttSheet(project, todayDay), ...(project.risks.length ? [risksSheet(project)] : [])],
     styles: NAMES.map((n) => STYLES[n]),
   })
 }

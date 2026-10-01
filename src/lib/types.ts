@@ -3,7 +3,7 @@ import type { WorkWeek } from './calendar'
 /** A calendar date stored as `YYYY-MM-DD`. */
 export type ISODate = string
 
-export type View = 'gantt' | 'board'
+export type View = 'gantt' | 'board' | 'risks'
 export type Zoom = 'day' | 'week' | 'month'
 export type Status = 'backlog' | 'todo' | 'doing' | 'done'
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
@@ -45,6 +45,12 @@ export interface Task {
   /** Subtasks hidden in the outline. */
   collapsed?: boolean
   notes?: string
+  /**
+   * A start set by hand on a task that has predecessors. It works like
+   * Microsoft Project's "start no earlier than": links can push the task
+   * later, but don't pull it earlier than this.
+   */
+  pin?: ISODate
 }
 
 export interface Ticket {
@@ -63,6 +69,18 @@ export interface Ticket {
   created: ISODate
 }
 
+export type Impact = 'low' | 'medium' | 'high'
+
+/** An entry in the risk and issue log. */
+export interface Risk {
+  id: string
+  name: string
+  impact: Impact
+  /** Chance it happens, 0 to 100. An issue that has already happened is 100. */
+  likelihood: number
+  notes: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -71,6 +89,7 @@ export interface Project {
   description: string
   tasks: Task[]
   tickets: Ticket[]
+  risks: Risk[]
   /** Last ticket number handed out. */
   seq: number
   view: View
@@ -80,7 +99,7 @@ export interface Project {
 }
 
 export interface AppState {
-  v: 2
+  v: 3
   current: string | undefined
   projects: Project[]
 }
@@ -98,5 +117,10 @@ export const LINK_TYPES: ReadonlyArray<readonly [LinkType, string]> = [
   ['SS', 'Start to start'],
   ['FF', 'Finish to finish'],
   ['SF', 'Start to finish'],
+]
+export const IMPACTS: ReadonlyArray<readonly [Impact, string]> = [
+  ['low', 'Low'],
+  ['medium', 'Med'],
+  ['high', 'High'],
 ]
 export const ZOOMS: readonly Zoom[] = ['day', 'week', 'month']

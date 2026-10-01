@@ -1,7 +1,7 @@
 import { fromDay, isValidDate, today } from './dates'
-import { schedule } from './plan'
-import { LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
-import type { AppState, Dependency, Project, Task, Ticket } from './types'
+import { keepManualStarts, schedule } from './plan'
+import { IMPACTS, LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
+import type { AppState, Dependency, Project, Risk, Task, Ticket } from './types'
 
 /** Same key as the original single-file version, so saved data carries over (older shapes are upgraded on load). */
 export const STORAGE_KEY = 'pmc.v1'
@@ -43,13 +43,19 @@ export function seedState(todayDay = today()): AppState {
     ticket(6, 'Export product copy from old CMS', 'doing', 'low', 'chore', id.content, 13),
     ticket(7, 'Set up analytics events', 'backlog', 'low', 'task', id.frontend),
   ]
+  const risk = (name: string, impact: Risk['impact'], likelihood: number, notes: string): Risk => ({ id: makeId(), name, impact, likelihood, notes })
+  const risks: Risk[] = [
+    risk('Content owners are slow to sign off copy', 'high', 60, 'Migration can\'t finish without approved copy. Ask each owner for a named deputy.'),
+    risk('Old blog URLs break on launch', 'medium', 40, 'Redirect map is in ticket WEB-5.'),
+    risk('Front-end developer on leave for a week in October', 'medium', 100, 'Already confirmed, so this is an issue. Alex covers code review.'),
+  ]
   return {
-    v: 2,
+    v: 3,
     current: 'p1',
     projects: [{
       id: 'p1', name: 'Website relaunch (example)', key: 'WEB',
       description: 'Sample project to show how plans, the Gantt chart and tickets fit together. Edit it or delete it.',
-      tasks, tickets, seq: 7, view: 'gantt', zoom: 'day', workWeek: 'weekdays',
+      tasks, tickets, risks, seq: 7, view: 'gantt', zoom: 'day', workWeek: 'weekdays',
     }],
   }
 }
@@ -119,6 +125,7 @@ export function parseBackup(text: string): AppState | string {
         milestone: Boolean(t.milestone),
         collapsed: Boolean(t.collapsed),
         notes: str(t.notes),
+        ...(isValidDate(t.pin) ? { pin: t.pin } : {}),
       }))
     const taskIds = new Set(tasks.map((t) => t.id))
     const tickets: Ticket[] = (Array.isArray(p.tickets) ? p.tickets : []).filter(isObj).map((t, i) => ({
@@ -133,22 +140,31 @@ export function parseBackup(text: string): AppState | string {
       description: str(t.description),
       created: isValidDate(t.created) ? t.created : fromDay(today()),
     }))
+    const risks: Risk[] = (Array.isArray(p.risks) ? p.risks : []).filter(isObj).map((r) => ({
+      id: str(r.id, makeId()),
+      name: str(r.name),
+      impact: oneOf(IMPACTS.map(([i]) => i), r.impact, 'medium'),
+      likelihood: Math.min(100, Math.max(0, Math.round(Number(r.likelihood) || 0))),
+      notes: str(r.notes),
+    }))
     return {
       id: str(p.id, makeId()),
       name: str(p.name, 'Untitled project'),
       key: str(p.key, 'PRJ'),
       description: str(p.description),
       // Repairs the outline, drops links that can't be scheduled and rolls up parents.
-      tasks: schedule(tasks, workWeek),
+      // Older plans only pushed tasks later, so gaps after predecessors were set by hand; keep them.
+      tasks: schedule(Number(data.v) >= 3 ? tasks : keepManualStarts(tasks, workWeek), workWeek),
       tickets,
+      risks,
       seq: Math.max(Number(p.seq) || 0, ...tickets.map((t) => t.num), 0),
-      view: p.view === 'board' ? 'board' : 'gantt',
+      view: p.view === 'board' || p.view === 'risks' ? p.view : 'gantt',
       zoom: oneOf(ZOOMS, p.zoom, 'day'),
       workWeek,
     }
   })
   const current = projects.some((p) => p.id === data.current) ? (data.current as string) : projects[0]?.id
-  return { v: 2, current, projects }
+  return { v: 3, current, projects }
 }
 
 /** Version 1 stored predecessors as bare ids, which meant finish-to-start. */
