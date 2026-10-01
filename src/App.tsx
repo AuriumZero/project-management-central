@@ -9,19 +9,31 @@ import { projectStats } from './lib/schedule'
 import { loadState, parseBackup, saveState, seedState } from './lib/storage'
 import { TICKET_TYPES, ZOOMS } from './lib/types'
 import type { AppState, Status, Task, Ticket, TicketType } from './lib/types'
-import { currentProject, reducer } from './state/reducer'
+import { historyReducer, initHistory } from './state/history'
+import { currentProject } from './state/reducer'
 
 type Dialog =
   | { kind: 'project'; isNew: boolean }
-  | { kind: 'task'; task?: Task }
+  | { kind: 'task'; task?: Task; parentId?: string }
   | { kind: 'ticket'; ticket?: Ticket; status?: Status }
   | { kind: 'backup' }
   | { kind: 'restore'; data: AppState }
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1)
 
+const DETAILS_KEY = 'pmc.ui.details'
+function initialDetails(): boolean {
+  try {
+    const saved = localStorage.getItem(DETAILS_KEY)
+    if (saved) return saved === '1'
+  } catch { /* storage blocked: fall through */ }
+  return typeof window === 'undefined' || window.innerWidth >= 1200
+}
+
 export default function App({ initialState }: { initialState?: AppState }) {
-  const [state, dispatch] = useReducer(reducer, initialState, (init) => init ?? loadState() ?? seedState())
+  const [history, dispatch] = useReducer(historyReducer, initialState, (init) => initHistory(init ?? loadState() ?? seedState()))
+  const state = history.present
+  const [details, setDetails] = useState(initialDetails)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [filters, setFilters] = useState<TicketFilters>({ query: '', type: '' })
   const [toastMsg, setToastMsg] = useState('')
@@ -45,6 +57,22 @@ export default function App({ initialState }: { initialState?: AppState }) {
       toast('This browser is not saving changes. Back up your data before closing.')
     }
   }, [state, toast])
+
+  useEffect(() => {
+    try { localStorage.setItem(DETAILS_KEY, details ? '1' : '0') } catch { /* not critical */ }
+  }, [details])
+
+  // Ctrl/⌘+Z and Ctrl/⌘+Shift+Z, except while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return
+      if ((e.target as HTMLElement).closest('input, textarea, select, [role=dialog]')) return
+      e.preventDefault()
+      dispatch({ type: e.shiftKey ? 'redo' : 'undo' })
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   const selectProject = (id: string) => {
     dispatch({ type: 'selectProject', id })
@@ -135,6 +163,13 @@ export default function App({ initialState }: { initialState?: AppState }) {
                         <button key={z} aria-pressed={project.zoom === z} onClick={() => dispatch({ type: 'setZoom', zoom: z })}>{capitalize(z)}</button>
                       ))}
                     </div>
+                    <div className="seg" role="group" aria-label="History">
+                      <button disabled={!history.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo (Ctrl+Z)">Undo</button>
+                      <button disabled={!history.future.length} onClick={() => dispatch({ type: 'redo' })} title="Redo (Ctrl+Shift+Z)">Redo</button>
+                    </div>
+                    <button className="btn hide-narrow" aria-pressed={details} onClick={() => setDetails((d) => !d)}>
+                      {details ? 'Hide columns' : 'Show columns'}
+                    </button>
                     <button className="btn" onClick={() => gantt.current?.scrollToToday()}>Today</button>
                     <button className="btn primary" onClick={() => setDialog({ kind: 'task' })}>+ Task</button>
                   </>
@@ -155,7 +190,9 @@ export default function App({ initialState }: { initialState?: AppState }) {
                 project={project}
                 dispatch={dispatch}
                 onEditTask={(task) => setDialog({ kind: 'task', task })}
-                onNewTask={() => setDialog({ kind: 'task' })}
+                onNewTask={(parentId) => setDialog({ kind: 'task', parentId })}
+                toast={toast}
+                details={details}
               />
             )}
           </>
@@ -163,7 +200,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
       </main>
 
       {dialog?.kind === 'project' && <ProjectDialog {...dialogProps} project={dialog.isNew ? undefined : project} />}
-      {dialog?.kind === 'task' && project && <TaskDialog {...dialogProps} project={project} task={dialog.task} />}
+      {dialog?.kind === 'task' && project && <TaskDialog {...dialogProps} project={project} task={dialog.task} parentId={dialog.parentId} />}
       {dialog?.kind === 'ticket' && project && <TicketDialog {...dialogProps} project={project} ticket={dialog.ticket} status={dialog.status} />}
       {dialog?.kind === 'backup' && <BackupDialog state={state} onClose={closeDialog} toast={toast} />}
       {dialog?.kind === 'restore' && <RestoreDialog {...dialogProps} data={dialog.data} />}

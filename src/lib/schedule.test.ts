@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { toDay } from './dates'
-import { DAY_WIDTH, dragOffsets, ganttLayout, projectKey, projectStats, ROW_HEIGHT } from './schedule'
-import type { Project, Task } from './types'
+import { DAY_WIDTH, dragOffsets, ganttLayout, linkPath, projectKey, projectStats, ROW_HEIGHT } from './schedule'
+import type { ChartRow } from './schedule'
+import type { Dependency, Project, Task } from './types'
 
 const task = (id: string, start: string, end: string, extra: Partial<Task> = {}): Task =>
-  ({ id, name: id, start, end, progress: 0, deps: [], ...extra })
+  ({ id, name: id, start, end, progress: 0, deps: [], parentId: '', assignee: '', ...extra })
+
+const row = (id: string, start: string, end: string, extra: Partial<ChartRow> = {}): ChartRow =>
+  ({ id, start, end, milestone: false, summary: false, deps: [], ...extra })
+
+const fs = (id: string): Dependency => ({ id, type: 'FS', lag: 0 })
 
 const project = (tasks: Task[]): Project =>
   ({ id: 'p', name: 'P', key: 'P', description: '', tasks, tickets: [], seq: 0, view: 'gantt', zoom: 'day' })
@@ -17,6 +23,15 @@ describe('projectStats', () => {
     ])
     expect(projectStats(p).percent).toBe(75)
     expect(projectStats(p).span).toEqual([toDay('2026-10-01'), toDay('2026-10-04')])
+  })
+
+  it('counts subtasks, not the parents that summarise them', () => {
+    const p = project([
+      task('parent', '2026-10-01', '2026-10-04', { progress: 50 }),
+      task('a', '2026-10-01', '2026-10-02', { parentId: 'parent', progress: 100 }),
+      task('b', '2026-10-03', '2026-10-04', { parentId: 'parent', progress: 0 }),
+    ])
+    expect(projectStats(p).percent).toBe(50)
   })
 
   it('handles an empty plan', () => {
@@ -32,56 +47,71 @@ describe('projectKey', () => {
 
 describe('ganttLayout', () => {
   const today = toDay('2026-10-01')
-  const tasks = [
-    task('a', '2026-10-01', '2026-10-05'),
-    task('b', '2026-10-06', '2026-10-08', { deps: ['a'] }),
-    task('m', '2026-10-09', '2026-10-09', { deps: ['b'], milestone: true }),
+  const rows = [
+    row('a', '2026-10-01', '2026-10-05'),
+    row('b', '2026-10-06', '2026-10-08', { deps: [fs('a')] }),
+    row('m', '2026-10-09', '2026-10-09', { deps: [fs('b')], milestone: true }),
+    row('s', '2026-10-01', '2026-10-09', { summary: true }),
   ]
 
   it('pads the range around the tasks and today', () => {
-    const l = ganttLayout(tasks, 'day', today)
+    const l = ganttLayout(rows, 'day', today)
     expect(l.min).toBe(today - 3)
     expect(l.width).toBe((l.max - l.min + 1) * DAY_WIDTH.day)
     expect(l.width).toBeGreaterThanOrEqual(1100)
-    expect(l.height).toBe(4 * ROW_HEIGHT)
+    expect(l.height).toBe(5 * ROW_HEIGHT)
   })
 
-  it('places bars by date and length', () => {
-    const l = ganttLayout(tasks, 'day', today)
-    expect(l.bars[0]).toMatchObject({ x: 3 * 34, width: 5 * 34, milestone: false })
+  it('places bars by date and length, and marks milestones and summaries', () => {
+    const l = ganttLayout(rows, 'day', today)
+    expect(l.bars[0]).toMatchObject({ x: 3 * 34, width: 5 * 34, kind: 'task' })
     expect(l.bars[1].x).toBe(8 * 34)
-    expect(l.bars[2].milestone).toBe(true)
+    expect(l.bars[2].kind).toBe('milestone')
+    expect(l.bars[3]).toMatchObject({ x: 3 * 34, width: 9 * 34, kind: 'summary' })
   })
 
   it('draws one arrow per dependency', () => {
-    const l = ganttLayout(tasks, 'day', today)
-    expect(l.arrows).toHaveLength(2)
+    const l = ganttLayout(rows, 'day', today)
+    expect(l.arrows.map((a) => [a.from, a.to])).toEqual([['a', 'b'], ['b', 'm']])
     // b starts the day after a ends, so the arrow drops between rows and comes back in.
-    expect(l.arrows[0]).toBe('M272 20 H278 V40 H264 V60 H271')
+    expect(l.arrows[0].path).toBe('M272 20 H280 V40 H264 V60 H271')
   })
 
   it('draws a straight elbow when there is a gap before the successor', () => {
-    const gap = [task('a', '2026-10-01', '2026-10-02'), task('b', '2026-10-06', '2026-10-07', { deps: ['a'] })]
+    const gap = [row('a', '2026-10-01', '2026-10-02'), row('b', '2026-10-06', '2026-10-07', { deps: [fs('a')] })]
     // a ends at the right edge of Oct 2 (x=170); b starts at Oct 6 (x=272).
-    expect(ganttLayout(gap, 'day', today).arrows[0]).toBe('M170 20 H176 V60 H271')
+    expect(ganttLayout(gap, 'day', today).arrows[0].path).toBe('M170 20 H178 V60 H271')
   })
 
-  it('routes around when a successor starts before its predecessor ends', () => {
-    const overlap = [task('a', '2026-10-01', '2026-10-10'), task('b', '2026-10-03', '2026-10-04', { deps: ['a'] })]
-    expect(ganttLayout(overlap, 'day', today).arrows[0].match(/V/g)).toHaveLength(2)
+  it('connects the right edges for each link type', () => {
+    const pair = (type: Dependency['type']) => ganttLayout([
+      row('a', '2026-10-01', '2026-10-02'),
+      row('b', '2026-10-04', '2026-10-05', { deps: [{ id: 'a', type, lag: 0 }] }),
+    ], 'day', today).arrows[0].path
+    // a spans x 102–170, b spans x 204–272.
+    expect(pair('SS')).toBe('M102 20 H94 V60 H203')
+    expect(pair('FF')).toBe('M170 20 H280 V60 H273')
+    expect(pair('SF').startsWith('M102 20')).toBe(true)
+    expect(pair('SF').endsWith('H273')).toBe(true)
   })
 
-  it('ignores dependencies on missing tasks', () => {
-    expect(ganttLayout([task('a', '2026-10-01', '2026-10-02', { deps: ['gone'] })], 'day', today).arrows).toEqual([])
+  it('ignores dependencies on rows that are not shown', () => {
+    expect(ganttLayout([row('a', '2026-10-01', '2026-10-02', { deps: [fs('gone')] })], 'day', today).arrows).toEqual([])
   })
 
   it('labels every day when zoomed to days and only Mondays when zoomed to weeks', () => {
-    const day = ganttLayout(tasks, 'day', today)
+    const day = ganttLayout(rows, 'day', today)
     expect(day.days).toHaveLength(day.max - day.min + 1)
     expect(day.days.filter((d) => d.isToday)).toHaveLength(1)
-    const week = ganttLayout(tasks, 'week', today)
+    const week = ganttLayout(rows, 'week', today)
     expect(week.days.every((d) => d.weekStart)).toBe(true)
-    expect(ganttLayout(tasks, 'month', today).days).toEqual([])
+    expect(ganttLayout(rows, 'month', today).days).toEqual([])
+  })
+})
+
+describe('linkPath', () => {
+  it('turns on the outside for start-to-start links', () => {
+    expect(linkPath(100, 20, -1, 300, 60, 1)).toBe('M100 20 H92 V60 H299')
   })
 })
 

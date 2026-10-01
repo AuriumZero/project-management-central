@@ -12,10 +12,11 @@ describe('seedState', () => {
     const s = seedState(toDay('2026-10-01'))
     const p = s.projects[0]
     expect(s.current).toBe(p.id)
-    expect(p.tasks).toHaveLength(7)
+    expect(p.tasks).toHaveLength(12)
+    expect(p.tasks.filter((t) => t.parentId)).toHaveLength(8)
     expect(p.tickets.map((t) => t.num)).toEqual([1, 2, 3, 4, 5, 6, 7])
     expect(p.seq).toBe(7)
-    expect(p.tasks[1].deps).toEqual([p.tasks[0].id])
+    expect(p.tasks.find((t) => t.name === 'Requirements document')?.deps).toEqual([{ id: p.tasks[1].id, type: 'FS', lag: 0 }])
   })
 })
 
@@ -59,6 +60,7 @@ describe('parseBackup', () => {
     expect(parsed.projects[0]).toMatchObject({ name: 'Old', view: 'board', zoom: 'week', seq: 2 })
     expect(parsed.projects[0]).not.toHaveProperty('_scroll')
     expect(parsed.projects[0].tickets[0]).toMatchObject({ status: 'doing', taskId: 't1' })
+    expect(parsed.projects[0].tasks[0]).toMatchObject({ parentId: '', assignee: '', deps: [] })
   })
 
   it('repairs bad values instead of failing', () => {
@@ -67,7 +69,7 @@ describe('parseBackup', () => {
       projects: [{
         id: 'p', name: 'P',
         tasks: [
-          { id: 'a', name: 'A', start: '2026-10-01', end: '2026-10-02', progress: 250, deps: ['a', 'ghost', 'b'] },
+          { id: 'a', name: 'A', start: '2026-10-05', end: '2026-10-06', progress: 250, deps: ['a', 'ghost', 'b', { id: 'b', type: 'XX' }] },
           { id: 'b', name: 'B', start: '2026-10-01', end: '2026-10-02', deps: [] },
           { id: 'bad', name: 'Bad dates', start: 'soon', end: 'later' },
         ],
@@ -78,7 +80,7 @@ describe('parseBackup', () => {
     const p = parsed.projects[0]
     expect(parsed.current).toBe('p')
     expect(p.tasks.map((t) => t.id)).toEqual(['a', 'b'])
-    expect(p.tasks[0]).toMatchObject({ progress: 100, deps: ['b'] })
+    expect(p.tasks[0]).toMatchObject({ progress: 100, deps: [{ id: 'b', type: 'FS', lag: 0 }] })
     expect(p.tickets[0]).toMatchObject({ status: 'todo', taskId: '', priority: 'medium' })
     expect(p.seq).toBe(9)
   })

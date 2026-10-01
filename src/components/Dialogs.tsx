@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import type { Dispatch } from 'react'
 import { fromDay, toDay, today } from '../lib/dates'
+import { childrenOf, dropsLinks, outline } from '../lib/plan'
 import { projectKey } from '../lib/schedule'
 import { makeId } from '../lib/storage'
-import { PRIORITIES, STATUSES, TICKET_TYPES } from '../lib/types'
-import type { AppState, Project, Status, Task, Ticket } from '../lib/types'
+import { LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES } from '../lib/types'
+import type { AppState, Dependency, LinkType, Project, Status, Task, Ticket } from '../lib/types'
 import type { Action } from '../state/reducer'
 import { DeleteButton, Field, FormError, Modal } from './Modal'
 
@@ -52,43 +53,113 @@ export function ProjectDialog({ project, dispatch, onClose, toast }: DialogBase 
   )
 }
 
-/** A blank task scheduled right after the last one in the plan. */
-export function newTask(project: Project, todayDay = today()): Task {
+/**
+ * A blank task. A new subtask starts with its parent's dates (or right after
+ * the parent's last subtask); a new parent task starts after the last task.
+ */
+export function newTask(project: Project, parentId = '', todayDay = today()): Task {
+  const base = { id: makeId(), name: '', progress: 0, deps: [], parentId, assignee: '', notes: '' }
+  const parent = project.tasks.find((t) => t.id === parentId)
+  if (parent) {
+    const kids = childrenOf(project.tasks, parent.id)
+    if (!kids.length) return { ...base, start: parent.start, end: parent.milestone ? fromDay(toDay(parent.start) + 2) : parent.end }
+    const start = Math.max(...kids.map((k) => toDay(k.end))) + 1
+    return { ...base, start: fromDay(start), end: fromDay(start + 2) }
+  }
   const lastEnd = project.tasks.length ? Math.max(...project.tasks.map((t) => toDay(t.end))) : todayDay - 1
   const start = Math.max(todayDay, lastEnd + 1)
-  return { id: makeId(), name: '', start: fromDay(start), end: fromDay(start + 4), progress: 0, deps: [], notes: '' }
+  return { ...base, start: fromDay(start), end: fromDay(start + 4) }
 }
 
-export function TaskDialog({ project, task, dispatch, onClose, toast }: DialogBase & { project: Project; task?: Task }) {
+interface LinkEditorProps {
+  label: string
+  links: Dependency[]
+  options: Task[]
+  numById: Map<string, number>
+  onChange: (links: Dependency[]) => void
+}
+
+/** Edits a list of links to other tasks: which task, link type and lag. */
+function LinkEditor({ label, links, options, numById, onChange }: LinkEditorProps) {
+  const update = (i: number, patch: Partial<Dependency>) => onChange(links.map((l, j) => (j === i ? { ...l, ...patch } : l)))
+  const unused = options.filter((o) => !links.some((l) => l.id === o.id))
+  const name = (t: Task) => `${numById.get(t.id) ?? ''} · ${t.parentId ? '— ' : ''}${t.name || 'Untitled'}`
+  return (
+    <fieldset className="field full links">
+      <legend>{label}</legend>
+      {links.map((link, i) => (
+        <div className="link-row" key={link.id}>
+          <select className="input" aria-label={`${label}: task`} value={link.id} onChange={(e) => update(i, { id: e.target.value })}>
+            {options.filter((o) => o.id === link.id || !links.some((l) => l.id === o.id)).map((o) => <option key={o.id} value={o.id}>{name(o)}</option>)}
+          </select>
+          <select className="input" aria-label={`${label}: link type`} value={link.type} onChange={(e) => update(i, { type: e.target.value as LinkType })}>
+            {LINK_TYPES.map(([v, l]) => <option key={v} value={v}>{v} · {l}</option>)}
+          </select>
+          <label className="lag">
+            <span className="sr-only">Lag in days</span>
+            <input className="input mono" type="number" value={link.lag} onChange={(e) => update(i, { lag: Math.round(Number(e.target.value) || 0) })} />
+            <span aria-hidden="true">d</span>
+          </label>
+          <button type="button" className="btn ghost small" aria-label={`Remove ${label.toLowerCase()} link`} onClick={() => onChange(links.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      {unused.length > 0 && (
+        <button type="button" className="btn ghost small add-link" onClick={() => onChange([...links, { id: unused[0].id, type: 'FS', lag: 0 }])}>
+          + Add {label.toLowerCase().replace(/s$/, '')}
+        </button>
+      )}
+      {!links.length && !unused.length && <p className="note">No other tasks to link to yet.</p>}
+    </fieldset>
+  )
+}
+
+export function TaskDialog({ project, task, parentId, dispatch, onClose, toast }: DialogBase & { project: Project; task?: Task; parentId?: string }) {
   const isNew = !task
-  const [draft, setDraft] = useState<Task>(() => task ?? newTask(project))
+  const [draft, setDraft] = useState<Task>(() => task ?? newTask(project, parentId))
+  const [successors, setSuccessors] = useState<Dependency[]>(() =>
+    project.tasks.flatMap((t) => t.deps.filter((d) => d.id === draft.id).map((d) => ({ ...d, id: t.id }))))
   const [error, setError] = useState('')
   const set = <K extends keyof Task>(k: K, v: Task[K]) => setDraft((d) => ({ ...d, [k]: v }))
-  const others = project.tasks.filter((t) => t.id !== draft.id)
+
+  const rows = outline(project.tasks)
+  const numById = new Map(rows.map((r) => [r.task.id, r.num]))
+  const others = rows.map((r) => r.task).filter((t) => t.id !== draft.id)
+  const hasKids = project.tasks.some((t) => t.parentId === draft.id)
+  const parents = project.tasks.filter((t) => !t.parentId && t.id !== draft.id)
   const linked = project.tickets.filter((t) => t.taskId === draft.id)
-  const index = project.tasks.findIndex((t) => t.id === draft.id)
+  const siblings = project.tasks.filter((t) => t.parentId === draft.parentId)
+  const index = siblings.findIndex((t) => t.id === draft.id)
+  const kind = draft.parentId ? 'Subtask' : hasKids ? 'Parent task' : 'Task'
 
   const save = () => {
     const end = draft.milestone ? draft.start : draft.end
     if (!draft.name.trim()) return setError('Give the task a name.')
     if (!draft.start || !end) return setError('Pick a start and an end date.')
     if (toDay(end) < toDay(draft.start)) return setError('The end date is before the start date. Move one of them.')
-    dispatch({ type: 'saveTask', task: { ...draft, name: draft.name.trim(), end, notes: draft.notes?.trim() } })
+    const next: Task = { ...draft, name: draft.name.trim(), assignee: draft.assignee.trim(), end, notes: draft.notes?.trim() }
+    const proposed = [...project.tasks.filter((t) => t.id !== next.id), next].map((t) => (t.id === next.id ? t : {
+      ...t, deps: [...t.deps.filter((d) => d.id !== next.id), ...successors.filter((s) => s.id === t.id).map((s) => ({ ...s, id: next.id }))],
+    }))
+    if (dropsLinks(proposed)) return setError("Those links would make a loop, or tie a task to its own parent. Remove one and try again.")
+    dispatch({ type: 'saveTask', task: next, successors })
     onClose()
   }
   const move = (by: -1 | 1) => { dispatch({ type: 'moveTask', id: draft.id, by }); onClose() }
 
   return (
     <Modal
-      title={isNew ? 'New task' : 'Edit task'}
+      title={<><span className="modal-key">{kind}{numById.has(draft.id) ? ` · row ${numById.get(draft.id)}` : ''}</span>{isNew ? `New ${kind.toLowerCase()}` : 'Edit task'}</>}
       onClose={onClose}
       onSubmit={save}
       footer={<>
         {!isNew && (
           <div className="row">
-            <DeleteButton onConfirm={() => { dispatch({ type: 'deleteTask', id: draft.id }); onClose(); toast('Task deleted') }} />
+            <DeleteButton
+              label={hasKids ? 'Delete with subtasks' : 'Delete'}
+              onConfirm={() => { dispatch({ type: 'deleteTask', id: draft.id }); onClose(); toast('Task deleted') }}
+            />
             <button type="button" className="btn small" disabled={index <= 0} onClick={() => move(-1)} aria-label="Move up">↑</button>
-            <button type="button" className="btn small" disabled={index >= project.tasks.length - 1} onClick={() => move(1)} aria-label="Move down">↓</button>
+            <button type="button" className="btn small" disabled={index < 0 || index >= siblings.length - 1} onClick={() => move(1)} aria-label="Move down">↓</button>
           </div>
         )}
         <div className="r">
@@ -99,38 +170,43 @@ export function TaskDialog({ project, task, dispatch, onClose, toast }: DialogBa
     >
       <div className="fgrid">
         <Field label="Task name" full><input className="input" value={draft.name} onChange={(e) => set('name', e.target.value)} /></Field>
+        <Field label="Part of">
+          <select className="input" value={draft.parentId} disabled={hasKids} onChange={(e) => set('parentId', e.target.value)}>
+            <option value="">Nothing (a parent task)</option>
+            {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Assignee">
+          <input className="input" list="assignees" value={draft.assignee} disabled={hasKids} placeholder={hasKids ? 'Set on subtasks' : 'Who does it'} onChange={(e) => set('assignee', e.target.value)} />
+        </Field>
         <Field label="Start"><input className="input" type="date" value={draft.start} onChange={(e) => set('start', e.target.value)} /></Field>
-        <Field label="End"><input className="input" type="date" value={draft.milestone ? draft.start : draft.end} disabled={draft.milestone} onChange={(e) => set('end', e.target.value)} /></Field>
+        <Field label="Finish">
+          <input className="input" type="date" value={draft.milestone ? draft.start : draft.end} disabled={draft.milestone || hasKids} onChange={(e) => set('end', e.target.value)} />
+        </Field>
         <Field label={<>Progress <output className="mono">{draft.progress}%</output></>}>
-          <input type="range" min={0} max={100} step={5} value={draft.progress} onChange={(e) => set('progress', Number(e.target.value))} />
+          <input type="range" min={0} max={100} step={5} value={draft.progress} disabled={hasKids} onChange={(e) => set('progress', Number(e.target.value))} />
         </Field>
         <label className="field check">
-          <input type="checkbox" checked={!!draft.milestone} onChange={(e) => set('milestone', e.target.checked)} /> Milestone (single day)
+          <input type="checkbox" checked={!!draft.milestone} disabled={hasKids} onChange={(e) => set('milestone', e.target.checked)} /> Milestone (single day)
         </label>
-        {others.length > 0 && (
-          <fieldset className="field full">
-            <legend>Starts after</legend>
-            <div className="deps">
-              {others.map((o) => (
-                <label key={o.id}>
-                  <input
-                    type="checkbox"
-                    checked={draft.deps.includes(o.id)}
-                    onChange={(e) => set('deps', e.target.checked ? [...draft.deps, o.id] : draft.deps.filter((d) => d !== o.id))}
-                  /> {o.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
+        {hasKids && <p className="note full">Dates and progress roll up from this task's subtasks. Changing the start moves the whole group.</p>}
+        <LinkEditor label="Predecessors" links={draft.deps} options={others} numById={numById} onChange={(deps) => set('deps', deps)} />
+        <LinkEditor label="Successors" links={successors} options={others} numById={numById} onChange={setSuccessors} />
         <Field label="Notes" full><textarea className="input" value={draft.notes ?? ''} onChange={(e) => set('notes', e.target.value)} /></Field>
       </div>
+      <AssigneeList project={project} />
       {linked.length > 0 && (
         <p className="note">{linked.length} linked ticket{linked.length > 1 ? 's' : ''}: {linked.map((t) => `${project.key}-${t.num}`).join(', ')}</p>
       )}
       <FormError message={error} />
     </Modal>
   )
+}
+
+/** Suggestions for assignee fields: everyone already assigned in this project. */
+export function AssigneeList({ project }: { project: Project }) {
+  const names = [...new Set(project.tasks.map((t) => t.assignee).filter(Boolean))].sort()
+  return <datalist id="assignees">{names.map((n) => <option key={n} value={n} />)}</datalist>
 }
 
 export function TicketDialog({ project, ticket, status, dispatch, onClose, toast }: DialogBase & { project: Project; ticket?: Ticket; status?: Status }) {
@@ -182,7 +258,7 @@ export function TicketDialog({ project, ticket, status, dispatch, onClose, toast
         <Field label="Part of task" full>
           <select className="input" value={draft.taskId} onChange={(e) => set('taskId', e.target.value)}>
             <option value="">None</option>
-            {project.tasks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {outline(project.tasks).map(({ task: t, depth }) => <option key={t.id} value={t.id}>{depth ? '— ' : ''}{t.name}</option>)}
           </select>
         </Field>
         <Field label="Description" full><textarea className="input" value={draft.description} onChange={(e) => set('description', e.target.value)} /></Field>

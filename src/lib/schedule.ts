@@ -1,5 +1,6 @@
-import { dayOfMonth, formatDay, spanDays, toDay, weekday } from './dates'
-import type { Project, Task, Zoom } from './types'
+import { dayOfMonth, formatDay, toDay, weekday } from './dates'
+import { projectSummary } from './plan'
+import type { Dependency, ISODate, LinkType, Project, Zoom } from './types'
 
 /** Pixel width of one day at each zoom level. */
 export const DAY_WIDTH: Record<Zoom, number> = { day: 34, week: 14, month: 5 }
@@ -7,7 +8,7 @@ export const ROW_HEIGHT = 40
 export const BAR_HEIGHT = 22
 
 export interface ProjectStats {
-  /** Completion weighted by task duration, 0–100. */
+  /** Completion of the lowest-level tasks, weighted by duration, 0–100. */
   percent: number
   openTickets: number
   /** First start and last end day, or null with no tasks. */
@@ -15,15 +16,11 @@ export interface ProjectStats {
 }
 
 export function projectStats(project: Project): ProjectStats {
-  const { tasks, tickets } = project
-  const total = tasks.reduce((sum, t) => sum + spanDays(t.start, t.end), 0)
-  const done = tasks.reduce((sum, t) => sum + spanDays(t.start, t.end) * t.progress, 0)
+  const summary = projectSummary(project.tasks)
   return {
-    percent: total ? Math.round(done / total) : 0,
-    openTickets: tickets.filter((t) => t.status !== 'done').length,
-    span: tasks.length
-      ? [Math.min(...tasks.map((t) => toDay(t.start))), Math.max(...tasks.map((t) => toDay(t.end)))]
-      : null,
+    percent: summary?.progress ?? 0,
+    openTickets: project.tickets.filter((t) => t.status !== 'done').length,
+    span: summary ? [summary.start, summary.end] : null,
   }
 }
 
@@ -33,12 +30,31 @@ export function projectKey(name: string, key = ''): string {
   return source.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PRJ'
 }
 
+/** One row of the chart, in display order. */
+export interface ChartRow {
+  id: string
+  start: ISODate
+  end: ISODate
+  milestone: boolean
+  /** Drawn as a summary bracket: the project row and parents with subtasks. */
+  summary: boolean
+  deps: Dependency[]
+}
+
 export interface Bar {
   id: string
   x: number
   y: number
   width: number
-  milestone: boolean
+  kind: 'task' | 'milestone' | 'summary'
+}
+
+export interface Arrow {
+  /** Predecessor and successor ids. */
+  from: string
+  to: string
+  type: LinkType
+  path: string
 }
 
 export interface ScaleMark {
@@ -61,20 +77,21 @@ export interface GanttLayout {
   gridLines: number[]
   weekends: { x: number; width: number }[]
   bars: Bar[]
-  arrows: string[]
+  arrows: Arrow[]
   todayX: number | null
 }
 
 const MILESTONE = 18
+export const SUMMARY_HEIGHT = 10
 
 /**
  * Computes every position the Gantt chart draws: the visible date range,
- * the scale labels, the task bars and the dependency arrows.
+ * the scale labels, the bars and the dependency arrows.
  */
-export function ganttLayout(tasks: Task[], zoom: Zoom, todayDay: number, minWidth = 1100): GanttLayout {
+export function ganttLayout(rows: ChartRow[], zoom: Zoom, todayDay: number, minWidth = 1100): GanttLayout {
   const dayWidth = DAY_WIDTH[zoom]
-  const min = Math.min(todayDay, ...tasks.map((t) => toDay(t.start))) - 3
-  let max = Math.max(todayDay, ...tasks.map((t) => toDay(t.end))) + 14
+  const min = Math.min(todayDay, ...rows.map((t) => toDay(t.start))) - 3
+  let max = Math.max(todayDay, ...rows.map((t) => toDay(t.end))) + 14
   const minDays = Math.ceil(minWidth / dayWidth)
   if (max - min + 1 < minDays) max = min + minDays - 1
   const X = (day: number) => (day - min) * dayWidth
@@ -97,41 +114,59 @@ export function ganttLayout(tasks: Task[], zoom: Zoom, todayDay: number, minWidt
     }
   }
 
-  const row = new Map(tasks.map((t, i) => [t.id, i]))
   const centerY = (i: number) => i * ROW_HEIGHT + ROW_HEIGHT / 2
-  const bars: Bar[] = tasks.map((t, i) => {
+  const bars: Bar[] = rows.map((t, i) => {
     const s = toDay(t.start)
     const e = toDay(t.end)
-    return t.milestone
-      ? { id: t.id, x: X(s) + dayWidth / 2 - MILESTONE / 2, y: centerY(i) - MILESTONE / 2, width: MILESTONE, milestone: true }
-      : { id: t.id, x: X(s), y: centerY(i) - BAR_HEIGHT / 2, width: (e - s + 1) * dayWidth, milestone: false }
+    if (t.summary) return { id: t.id, x: X(s), y: centerY(i) - SUMMARY_HEIGHT / 2, width: (e - s + 1) * dayWidth, kind: 'summary' }
+    if (t.milestone) return { id: t.id, x: X(s) + dayWidth / 2 - MILESTONE / 2, y: centerY(i) - MILESTONE / 2, width: MILESTONE, kind: 'milestone' }
+    return { id: t.id, x: X(s), y: centerY(i) - BAR_HEIGHT / 2, width: (e - s + 1) * dayWidth, kind: 'task' }
   })
+  const index = new Map(rows.map((r, i) => [r.id, i]))
+  const edges = (i: number) => ({ left: bars[i].x, right: bars[i].x + bars[i].width })
 
-  const arrows: string[] = []
-  tasks.forEach((t, i) => {
-    for (const depId of t.deps) {
-      const j = row.get(depId)
+  const arrows: Arrow[] = []
+  rows.forEach((t, i) => {
+    for (const dep of t.deps) {
+      const j = index.get(dep.id)
       if (j === undefined) continue
-      const dep = tasks[j]
-      const x1 = dep.milestone ? X(toDay(dep.end)) + dayWidth / 2 + MILESTONE / 2 : X(toDay(dep.end) + 1)
-      const x2 = t.milestone ? X(toDay(t.start)) + dayWidth / 2 - MILESTONE / 2 - 3 : X(toDay(t.start))
-      const y1 = centerY(j)
-      const y2 = centerY(i)
-      const dir = y2 > y1 ? 1 : -1
-      arrows.push(x2 - x1 >= 12
-        ? `M${x1} ${y1} H${x1 + 6} V${y2} H${x2 - 1}`
-        // Successor starts before the predecessor ends: route around between rows.
-        : `M${x1} ${y1} H${x1 + 6} V${y2 - (dir * ROW_HEIGHT) / 2} H${x2 - 8} V${y2} H${x2 - 1}`)
+      // Leave the predecessor from its finish (FS, FF) or start (SS, SF) and
+      // enter the successor at its start (FS, SS) or finish (FF, SF).
+      const fromFinish = dep.type === 'FS' || dep.type === 'FF'
+      const toStart = dep.type === 'FS' || dep.type === 'SS'
+      arrows.push({
+        from: dep.id, to: t.id, type: dep.type,
+        path: linkPath(fromFinish ? edges(j).right : edges(j).left, centerY(j), fromFinish ? 1 : -1,
+          toStart ? edges(i).left : edges(i).right, centerY(i), toStart ? 1 : -1),
+      })
     }
   })
 
   return {
     min, max, dayWidth,
     width: (max - min + 1) * dayWidth,
-    height: (tasks.length + 1) * ROW_HEIGHT,
+    height: (rows.length + 1) * ROW_HEIGHT,
     months, days, gridLines, weekends, bars, arrows,
     todayX: todayDay >= min && todayDay <= max ? X(todayDay) + dayWidth / 2 : null,
   }
+}
+
+/**
+ * An elbow connector. `out` is the direction it leaves the predecessor
+ * (1 = rightward), `into` the direction it travels as it enters the
+ * successor (1 = rightward, into a start edge).
+ */
+export function linkPath(x1: number, y1: number, out: 1 | -1, x2: number, y2: number, into: 1 | -1): string {
+  const stub = 8
+  const a = x1 + out * stub
+  const b = x2 - into * stub
+  const tip = x2 - into
+  // SS and FF links can always turn on the outer side of both bars.
+  if (out !== into) return `M${x1} ${y1} H${out === 1 ? Math.max(a, b) : Math.min(a, b)} V${y2} H${tip}`
+  if ((b - a) * into >= 0) return `M${x1} ${y1} H${a} V${y2} H${tip}`
+  // No straight route: drop to the gap between the rows, cross, then come in.
+  const mid = y2 + (y2 > y1 ? -1 : 1) * (ROW_HEIGHT / 2)
+  return `M${x1} ${y1} H${a} V${mid} H${b} V${y2} H${tip}`
 }
 
 export type DragMode = 'move' | 'start' | 'end'
