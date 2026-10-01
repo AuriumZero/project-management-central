@@ -76,7 +76,7 @@ h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; lette
 .gantt { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); max-height: max(360px, calc(100vh - 230px)); position: relative }
 .g-inner { position: relative }
 .g-head { position: sticky; top: 0; z-index: 7; display: flex; height: 50px; background: var(--surface); border-bottom: 1px solid var(--line) }
-.g-corner { position: sticky; left: 0; z-index: 8; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; align-items: flex-end; padding: 0 12px 7px }
+.g-corner { position: sticky; left: 0; z-index: 8; flex: none; background: var(--surface); border-right: 1px solid var(--line) }
 .g-scale { position: relative; flex: none }
 .g-mon { position: absolute; top: 6px; font: 600 12px var(--f-display); white-space: nowrap; padding-left: 6px; border-left: 1px solid var(--line); height: 40px }
 .g-day { position: absolute; bottom: 6px; font: 400 10.5px var(--f-mono); color: var(--muted); text-align: center }
@@ -84,10 +84,6 @@ h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; lette
 .g-day.now { color: var(--surface); background: var(--today); border-radius: 3px; font-weight: 600 }
 .g-rows { display: flex }
 .g-names { position: sticky; left: 0; z-index: 6; flex: none; background: var(--surface); border-right: 1px solid var(--line) }
-.g-name { height: var(--rh); display: flex; flex-direction: column; justify-content: center; padding: 0 12px; border-bottom: 1px solid var(--sunk); cursor: pointer; min-width: 0 }
-.g-name:hover { background: var(--sunk) }
-.g-name .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500 }
-.g-name .d { font: 10.5px var(--f-mono); color: var(--muted); white-space: nowrap }
 .g-add { height: var(--rh); display: flex; align-items: center; padding: 0 8px }
 .g-body { position: relative; flex: none }
 .g-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--sunk) }
@@ -163,8 +159,6 @@ textarea.input { resize: vertical; min-height: 84px }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important } }
 
 /* Additions for the React version */
-.g-name { width: 100%; border: 0; border-bottom: 1px solid var(--sunk); background: none; text-align: left; font: inherit; color: inherit }
-.g-name .t, .g-name .d { display: block }
 .g-today-tag { top: auto; bottom: -1px }
 .row { display: flex; gap: 6px; flex-wrap: wrap }
 .field.check { flex-direction: row; align-items: center; gap: 8px; padding-top: 18px }
@@ -179,3 +173,79 @@ textarea.backup { min-height: 160px; font-size: 11px }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
 .input.filter { width: 170px }
 #root { height: 100% }
+
+/* Task grid (MS Project-style table to the left of the chart) */
+.grid-row { display: flex; align-items: stretch; height: var(--rh) }
+.g-corner .grid-row { height: 50px; align-items: flex-end; padding-bottom: 7px }
+.grid-row > span { flex: none; display: flex; align-items: center; min-width: 0; padding: 0 4px; border-right: 1px solid var(--sunk) }
+.g-corner .grid-row > span { border-right-color: transparent }
+.c-id { width: var(--c-id); justify-content: center; color: var(--muted); font-size: 11px }
+.c-name { width: var(--c-name); gap: 2px }
+.c-assignee { width: var(--c-assignee) }
+.c-start { width: var(--c-start) }
+.c-finish { width: var(--c-finish) }
+.c-days { width: var(--c-days) }
+.c-preds { width: var(--c-preds) }
+.c-pct { width: var(--c-pct) }
+.c-actions { width: var(--c-actions); justify-content: flex-end; gap: 1px; border-right: 0 !important }
+.g-name { border-bottom: 1px solid var(--sunk); background: var(--surface) }
+.g-name:hover, .g-name:focus-within { background: var(--sunk) }
+.g-name.parent .cell.name, .g-name.project .cell.name { font-weight: 600 }
+.g-name.project { background: var(--accent-soft) }
+.g-name.project .cell.name { font-family: var(--f-display); font-size: 14px }
+.ro { font-size: 12px; color: var(--fg) }
+.muted { color: var(--muted); font-size: 12px }
+.cell { width: 100%; min-width: 0; border: 1px solid transparent; background: transparent; border-radius: 4px; padding: 4px 5px; font-size: 13px }
+.cell.mono { font-size: 12px }
+.cell[type=date] { font-size: 12px; padding: 4px 2px }
+.cell:hover:not(:disabled) { border-color: var(--line) }
+.cell:focus { border-color: var(--accent); background: var(--surface); outline: none }
+.cell:disabled { color: var(--muted); opacity: 1 }
+.cell::placeholder { color: var(--muted); opacity: .6 }
+.twisty { flex: none; width: 18px; height: 22px; border: 0; background: none; color: var(--muted); padding: 0; font-size: 12px; border-radius: 3px }
+.twisty:hover { background: var(--line); color: var(--fg) }
+.twisty-gap { flex: none; width: 18px; text-align: center; color: var(--today); font-size: 10px }
+.g-name.project .twisty-gap { color: var(--accent) }
+.row-btn { flex: none; width: 26px; height: 26px; border: 1px solid transparent; background: none; border-radius: 4px; color: var(--muted); font-size: 13px; line-height: 1; padding: 0 }
+.row-btn:hover:not(:disabled) { border-color: var(--line); background: var(--surface); color: var(--fg) }
+.row-btn:disabled { opacity: .3; cursor: default }
+.row-btn.danger:hover { color: var(--p-urgent) }
+.row-btn.confirm { width: auto; padding: 0 8px; color: var(--surface); background: var(--p-urgent); font-size: 12px; font-weight: 600 }
+.row-btn-gap { flex: none; width: 26px }
+.g-add { padding-left: calc(var(--c-id) + 4px) }
+
+/* Summary bars: the project row and parents with subtasks */
+.bar.summary { height: 10px; border-radius: 0; background: var(--fg); box-shadow: none; opacity: .82 }
+.bar.summary::before, .bar.summary::after { content: ""; position: absolute; bottom: -6px; border: 5px solid transparent; border-top-color: var(--fg) }
+.bar.summary::before { left: 0; border-left-color: var(--fg) }
+.bar.summary::after { right: 0; border-right-color: var(--fg) }
+.bar.summary .fill { background: var(--bar); border-radius: 0 }
+.bar.summary .lbl { top: -3px; color: var(--fg); font-weight: 600 }
+.bar.summary.project { cursor: default; background: var(--accent); opacity: 1 }
+.bar.summary.project::before { border-left-color: var(--accent); border-top-color: var(--accent) }
+.bar.summary.project::after { border-right-color: var(--accent); border-top-color: var(--accent) }
+
+/* Drag from the dot to link two tasks */
+.link-dot { position: absolute; right: -14px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); opacity: 0; cursor: crosshair; z-index: 4; transition: opacity .12s }
+.bar:hover .link-dot, .link-dot:focus { opacity: 1 }
+.bar.ms .link-dot { transform: rotate(-45deg); right: -16px; top: 0; margin-top: 2px }
+.bar.summary .link-dot { right: -16px }
+.g-svg line.link-preview { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3 }
+
+/* Dependency editor in the task dialog */
+fieldset.links { display: flex; flex-direction: column; gap: 6px }
+.link-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 74px 30px; gap: 6px; align-items: center }
+.link-row .lag { display: flex; align-items: center; gap: 4px; color: var(--muted) }
+.link-row .lag .input { width: 100%; padding: 6px 6px }
+.add-link { align-self: flex-start }
+.note.full { grid-column: 1 / -1; margin: 0 }
+@media (max-width: 760px) { .hide-narrow { display: none } .link-row { grid-template-columns: minmax(0, 1fr) 90px 60px 30px } }
+
+.g-clip { overflow: hidden; width: 100%; height: 100% }
+.g-clip > .grid-row, .g-clip > .g-add { width: var(--full) }
+.g-names .g-clip > .grid-row { width: var(--full) }
+.g-split { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 9; touch-action: none }
+.g-split::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .12s }
+.g-split:hover::after { background: var(--accent) }
+.cell[type=number] { -moz-appearance: textfield; appearance: textfield }
+.cell[type=number]::-webkit-inner-spin-button, .cell[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0 }

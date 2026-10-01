@@ -1,3 +1,5 @@
+import type { WorkWeek } from './calendar'
+
 /** A calendar date stored as `YYYY-MM-DD`. */
 export type ISODate = string
 
@@ -7,6 +9,25 @@ export type Status = 'backlog' | 'todo' | 'doing' | 'done'
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 export type TicketType = 'task' | 'feature' | 'bug' | 'chore'
 
+/**
+ * How a successor is tied to its predecessor, as in Microsoft Project:
+ * FS finish-to-start, SS start-to-start, FF finish-to-finish, SF start-to-finish.
+ */
+export type LinkType = 'FS' | 'SS' | 'FF' | 'SF'
+
+export interface Dependency {
+  /** Id of the predecessor task. */
+  id: string
+  type: LinkType
+  /** Days of lag (positive) or lead (negative). */
+  lag: number
+}
+
+/**
+ * Tasks form a two-level outline. A task with no `parentId` is a parent task
+ * (a deliverable or milestone); a task with a `parentId` is a subtask. When a
+ * parent has subtasks, its dates and progress are rolled up from them.
+ */
 export interface Task {
   id: string
   name: string
@@ -14,9 +35,15 @@ export interface Task {
   end: ISODate
   /** 0 to 100. */
   progress: number
-  /** Ids of tasks that must finish before this one starts. */
-  deps: string[]
+  /** Predecessors this task waits on. */
+  deps: Dependency[]
+  /** Id of the parent task, or `''` for a top-level task. */
+  parentId: string
+  /** Person responsible, mainly for subtasks. */
+  assignee: string
   milestone?: boolean
+  /** Subtasks hidden in the outline. */
+  collapsed?: boolean
   notes?: string
 }
 
@@ -48,10 +75,12 @@ export interface Project {
   seq: number
   view: View
   zoom: Zoom
+  /** Whether durations skip weekends (the default) or count every day. */
+  workWeek: WorkWeek
 }
 
 export interface AppState {
-  v: 1
+  v: 2
   current: string | undefined
   projects: Project[]
 }
@@ -64,4 +93,10 @@ export const STATUSES: ReadonlyArray<readonly [Status, string]> = [
 ]
 export const PRIORITIES: readonly Priority[] = ['low', 'medium', 'high', 'urgent']
 export const TICKET_TYPES: readonly TicketType[] = ['task', 'feature', 'bug', 'chore']
+export const LINK_TYPES: ReadonlyArray<readonly [LinkType, string]> = [
+  ['FS', 'Finish to start'],
+  ['SS', 'Start to start'],
+  ['FF', 'Finish to finish'],
+  ['SF', 'Start to finish'],
+]
 export const ZOOMS: readonly Zoom[] = ['day', 'week', 'month']

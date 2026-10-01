@@ -2,6 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
+import { addWorkdays } from './lib/calendar'
+import { fromDay, toDay } from './lib/dates'
 import { loadState, seedState, STORAGE_KEY } from './lib/storage'
 
 const renderApp = () => {
@@ -14,7 +16,9 @@ describe('App', () => {
   it('opens on the sample project with its plan', () => {
     renderApp()
     expect(screen.getByRole('heading', { level: 1, name: 'Website relaunch (example)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Wireframes/ })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Wireframes')).toBeInTheDocument()
+    // Row 0 is the whole project, rolled up from every task.
+    expect(screen.getByLabelText('Project name')).toHaveValue('Website relaunch (example)')
     expect(screen.getByText('Open tickets').previousElementSibling).toHaveTextContent('6')
   })
 
@@ -24,7 +28,7 @@ describe('App', () => {
     await user.type(screen.getByLabelText('Task name'), 'Write launch email')
     await user.click(screen.getByRole('button', { name: 'Add task' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Write launch email/ })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Write launch email')).toBeInTheDocument()
     expect(localStorage.getItem(STORAGE_KEY)).toContain('Write launch email')
   })
 
@@ -33,10 +37,72 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '+ Task' }))
     await user.type(screen.getByLabelText('Task name'), 'Backwards')
     fireEvent.change(screen.getByLabelText('Start'), { target: { value: '2026-10-10' } })
-    fireEvent.change(screen.getByLabelText('End'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('Finish'), { target: { value: '2026-10-01' } })
     await user.click(screen.getByRole('button', { name: 'Add task' }))
     expect(screen.getByRole('alert')).toHaveTextContent('The end date is before the start date')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('renames a task right in the grid', async () => {
+    const user = renderApp()
+    const name = screen.getByDisplayValue('Wireframes')
+    await user.clear(name)
+    await user.type(name, 'Low-fi wireframes{Enter}')
+    expect(screen.getByDisplayValue('Low-fi wireframes')).toBeInTheDocument()
+    expect(localStorage.getItem(STORAGE_KEY)).toContain('Low-fi wireframes')
+  })
+
+  it('deletes a task from its row after a second click, and undo brings it back', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Delete Wireframes' }))
+    expect(screen.getByDisplayValue('Wireframes')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm delete Wireframes' }))
+    expect(screen.queryByDisplayValue('Wireframes')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByDisplayValue('Wireframes')).toBeInTheDocument()
+  })
+
+  it('adds a subtask with an assignee from the parent row', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Add subtask to Design' }))
+    expect(screen.getByRole('heading', { name: /New subtask/ })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Task name'), 'Accessibility audit')
+    await user.type(screen.getByLabelText('Assignee'), 'Robin')
+    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    const saved = loadState()!.projects[0].tasks
+    const design = saved.find((t) => t.name === 'Design')!
+    expect(saved.find((t) => t.name === 'Accessibility audit')).toMatchObject({ parentId: design.id, assignee: 'Robin' })
+  })
+
+  it('folds a parent to hide its subtasks', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Hide subtasks of Design' }))
+    expect(screen.queryByDisplayValue('Wireframes')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Show subtasks of Design' }))
+    expect(screen.getByDisplayValue('Wireframes')).toBeInTheDocument()
+  })
+
+  it('links tasks by typing predecessors and pushes the successor later', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    const launchRow = screen.getByDisplayValue('Launch').closest('[role=row]') as HTMLElement
+    const preds = within(launchRow).getByLabelText('Predecessors of Launch')
+    // Launch (row 12) already follows Build (row 8). Add a 2-day lag after it.
+    expect(preds).toHaveValue('8')
+    const before = within(launchRow).getByLabelText('Start of Launch').getAttribute('value')!
+    await user.clear(preds)
+    await user.type(preds, '8FS+2d{Enter}')
+    const after = within(screen.getByDisplayValue('Launch').closest('[role=row]') as HTMLElement).getByLabelText('Start of Launch')
+    // The sample project skips weekends, so the lag is two working days.
+    expect(after.getAttribute('value')).toBe(fromDay(addWorkdays(toDay(before), 2, 'weekdays')))
+  })
+
+  it('rejects a predecessor that would make a loop', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    const preds = screen.getByLabelText('Predecessors of Stakeholder interviews')
+    await user.type(preds, '3{Enter}')
+    expect(screen.getByRole('status')).toHaveTextContent('That link would make a loop')
   })
 
   it('creates a ticket in the column it was started from', async () => {

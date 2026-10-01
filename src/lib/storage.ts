@@ -1,8 +1,9 @@
 import { fromDay, isValidDate, today } from './dates'
-import { PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
-import type { AppState, Project, Task, Ticket } from './types'
+import { schedule } from './plan'
+import { LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
+import type { AppState, Dependency, Project, Task, Ticket } from './types'
 
-/** Same key and shape as the original single-file version, so saved data carries over. */
+/** Same key as the original single-file version, so saved data carries over (older shapes are upgraded on load). */
 export const STORAGE_KEY = 'pmc.v1'
 
 export function makeId(): string {
@@ -11,34 +12,44 @@ export function makeId(): string {
 
 export function seedState(todayDay = today()): AppState {
   const D = (offset: number) => fromDay(todayDay + offset)
-  const ids = Array.from({ length: 7 }, makeId)
-  const tasks: Task[] = [
-    { id: ids[0], name: 'Discovery & requirements', start: D(-12), end: D(-6), progress: 100, deps: [] },
-    { id: ids[1], name: 'Wireframes', start: D(-5), end: D(1), progress: 75, deps: [ids[0]] },
-    { id: ids[2], name: 'Visual design', start: D(2), end: D(9), progress: 0, deps: [ids[1]] },
-    { id: ids[3], name: 'Build front end', start: D(10), end: D(24), progress: 0, deps: [ids[2]] },
-    { id: ids[4], name: 'Content migration', start: D(6), end: D(18), progress: 10, deps: [] },
-    { id: ids[5], name: 'QA & fixes', start: D(25), end: D(30), progress: 0, deps: [ids[3], ids[4]] },
-    { id: ids[6], name: 'Launch', start: D(31), end: D(31), progress: 0, deps: [ids[5]], milestone: true },
-  ]
+  const id: Record<string, string> = Object.fromEntries(
+    ['discovery', 'interviews', 'requirements', 'design', 'wireframes', 'visual', 'review', 'build', 'frontend', 'content', 'qa', 'launch']
+      .map((k) => [k, makeId()]))
+  const fs = (pred: string, lag = 0): Dependency => ({ id: id[pred], type: 'FS', lag })
+  const t = (key: string, name: string, start: number, end: number, progress: number, extra: Partial<Task> = {}): Task =>
+    ({ id: id[key], name, start: D(start), end: D(end), progress, deps: [], parentId: '', assignee: '', ...extra })
+  const tasks: Task[] = schedule([
+    t('discovery', 'Discovery', -12, -4, 0),
+    t('interviews', 'Stakeholder interviews', -12, -8, 100, { parentId: id.discovery, assignee: 'Alex' }),
+    t('requirements', 'Requirements document', -7, -4, 100, { parentId: id.discovery, assignee: 'Sam', deps: [fs('interviews')] }),
+    t('design', 'Design', -3, 9, 0),
+    t('wireframes', 'Wireframes', -3, 2, 70, { parentId: id.design, assignee: 'Priya', deps: [fs('requirements')] }),
+    t('visual', 'Visual design', 0, 7, 20, { parentId: id.design, assignee: 'Priya', deps: [{ id: id.wireframes, type: 'SS', lag: 3 }] }),
+    t('review', 'Design review', 8, 9, 0, { parentId: id.design, assignee: 'Sam', deps: [fs('visual')] }),
+    t('build', 'Build', 10, 30, 0),
+    t('frontend', 'Front end', 10, 24, 0, { parentId: id.build, assignee: 'Alex', deps: [fs('design')] }),
+    t('content', 'Content migration', 12, 22, 10, { parentId: id.build, assignee: 'Jordan', deps: [{ id: id.frontend, type: 'SS', lag: 2 }] }),
+    t('qa', 'QA & fixes', 25, 30, 0, { parentId: id.build, assignee: 'Sam', deps: [fs('frontend'), fs('content')] }),
+    t('launch', 'Launch', 31, 31, 0, { milestone: true, deps: [fs('build')] }),
+  ], 'weekdays')
   const ticket = (num: number, title: string, status: Ticket['status'], priority: Ticket['priority'], type: Ticket['type'], taskId: string, due?: number, description = ''): Ticket =>
     ({ id: makeId(), num, title, status, priority, type, taskId, due: due == null ? '' : D(due), description, created: D(-14) })
   const tickets: Ticket[] = [
-    ticket(1, 'Interview three customers about checkout', 'done', 'medium', 'task', ids[0]),
-    ticket(2, 'Mobile nav wireframe', 'doing', 'high', 'feature', ids[1], 1, 'Hamburger vs. bottom bar. Test both with two people.'),
-    ticket(3, 'Pricing page wireframe', 'todo', 'medium', 'feature', ids[1], 1),
-    ticket(4, 'Pick type and colour palette', 'todo', 'medium', 'task', ids[2], 5),
-    ticket(5, 'Old blog URLs return 404', 'backlog', 'urgent', 'bug', ids[4], 12, 'Need 301 redirects for /blog/YYYY/slug.'),
-    ticket(6, 'Export product copy from old CMS', 'doing', 'low', 'chore', ids[4], 9),
-    ticket(7, 'Set up analytics events', 'backlog', 'low', 'task', ids[3]),
+    ticket(1, 'Interview three customers about checkout', 'done', 'medium', 'task', id.interviews),
+    ticket(2, 'Mobile nav wireframe', 'doing', 'high', 'feature', id.wireframes, 1, 'Hamburger vs. bottom bar. Test both with two people.'),
+    ticket(3, 'Pricing page wireframe', 'todo', 'medium', 'feature', id.wireframes, 2),
+    ticket(4, 'Pick type and colour palette', 'todo', 'medium', 'task', id.visual, 5),
+    ticket(5, 'Old blog URLs return 404', 'backlog', 'urgent', 'bug', id.content, 14, 'Need 301 redirects for /blog/YYYY/slug.'),
+    ticket(6, 'Export product copy from old CMS', 'doing', 'low', 'chore', id.content, 13),
+    ticket(7, 'Set up analytics events', 'backlog', 'low', 'task', id.frontend),
   ]
   return {
-    v: 1,
+    v: 2,
     current: 'p1',
     projects: [{
       id: 'p1', name: 'Website relaunch (example)', key: 'WEB',
       description: 'Sample project to show how plans, the Gantt chart and tickets fit together. Edit it or delete it.',
-      tasks, tickets, seq: 7, view: 'gantt', zoom: 'day',
+      tasks, tickets, seq: 7, view: 'gantt', zoom: 'day', workWeek: 'weekdays',
     }],
   }
 }
@@ -92,6 +103,8 @@ export function parseBackup(text: string): AppState | string {
   if (!isObj(data) || !Array.isArray(data.projects)) return 'That file is not a Project Management Central backup.'
 
   const projects: Project[] = data.projects.filter(isObj).map((p) => {
+    // Projects saved before the setting existed get the Microsoft Project default.
+    const workWeek = p.workWeek === 'all' ? 'all' : 'weekdays'
     const tasks: Task[] = (Array.isArray(p.tasks) ? p.tasks : []).filter(isObj)
       .filter((t) => isValidDate(t.start) && isValidDate(t.end))
       .map((t) => ({
@@ -100,12 +113,14 @@ export function parseBackup(text: string): AppState | string {
         start: t.start as string,
         end: t.end as string,
         progress: Math.min(100, Math.max(0, Number(t.progress) || 0)),
-        deps: Array.isArray(t.deps) ? t.deps.filter((d): d is string => typeof d === 'string') : [],
+        deps: (Array.isArray(t.deps) ? t.deps : []).map(parseDependency).filter((d): d is Dependency => d !== null),
+        parentId: str(t.parentId),
+        assignee: str(t.assignee),
         milestone: Boolean(t.milestone),
+        collapsed: Boolean(t.collapsed),
         notes: str(t.notes),
       }))
     const taskIds = new Set(tasks.map((t) => t.id))
-    tasks.forEach((t) => { t.deps = t.deps.filter((d) => taskIds.has(d) && d !== t.id) })
     const tickets: Ticket[] = (Array.isArray(p.tickets) ? p.tickets : []).filter(isObj).map((t, i) => ({
       id: str(t.id, makeId()),
       num: Number.isInteger(t.num) ? (t.num as number) : i + 1,
@@ -123,13 +138,26 @@ export function parseBackup(text: string): AppState | string {
       name: str(p.name, 'Untitled project'),
       key: str(p.key, 'PRJ'),
       description: str(p.description),
-      tasks,
+      // Repairs the outline, drops links that can't be scheduled and rolls up parents.
+      tasks: schedule(tasks, workWeek),
       tickets,
       seq: Math.max(Number(p.seq) || 0, ...tickets.map((t) => t.num), 0),
       view: p.view === 'board' ? 'board' : 'gantt',
       zoom: oneOf(ZOOMS, p.zoom, 'day'),
+      workWeek,
     }
   })
   const current = projects.some((p) => p.id === data.current) ? (data.current as string) : projects[0]?.id
-  return { v: 1, current, projects }
+  return { v: 2, current, projects }
+}
+
+/** Version 1 stored predecessors as bare ids, which meant finish-to-start. */
+function parseDependency(value: unknown): Dependency | null {
+  if (typeof value === 'string') return { id: value, type: 'FS', lag: 0 }
+  if (!isObj(value) || typeof value.id !== 'string') return null
+  return {
+    id: value.id,
+    type: oneOf(LINK_TYPES.map(([t]) => t), value.type, 'FS'),
+    lag: Number.isFinite(Number(value.lag)) ? Math.round(Number(value.lag)) : 0,
+  }
 }
