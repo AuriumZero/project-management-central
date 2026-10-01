@@ -63,9 +63,9 @@ describe('reducer', () => {
   })
 
   it('adds, edits and deletes risks', () => {
-    let s = reducer(empty(), { type: 'addRisk', risk: { id: 'r', name: 'Vendor late', impact: 'high', likelihood: 30, notes: '' } })
+    let s = reducer(empty(), { type: 'addRisk', risk: { id: 'r', name: 'Vendor late', kind: 'risk', impact: 'high', likelihood: 30, notes: '' } })
     s = reducer(s, { type: 'updateRisk', id: 'r', patch: { likelihood: 80, notes: 'Chased twice' } })
-    expect(currentProject(s)!.risks).toEqual([{ id: 'r', name: 'Vendor late', impact: 'high', likelihood: 80, notes: 'Chased twice' }])
+    expect(currentProject(s)!.risks).toEqual([{ id: 'r', name: 'Vendor late', kind: 'risk', impact: 'high', likelihood: 80, notes: 'Chased twice' }])
     s = reducer(s, { type: 'deleteRisk', id: 'r' })
     expect(currentProject(s)!.risks).toEqual([])
   })

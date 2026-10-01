@@ -70,11 +70,14 @@ export interface Ticket {
 }
 
 export type Impact = 'low' | 'medium' | 'high'
+/** A risk might happen; an issue already has. */
+export type RiskKind = 'risk' | 'issue'
 
 /** An entry in the risk and issue log. */
 export interface Risk {
   id: string
   name: string
+  kind: RiskKind
   impact: Impact
   /** Chance it happens, 0 to 100. An issue that has already happened is 100. */
   likelihood: number
@@ -122,5 +125,9 @@ export const IMPACTS: ReadonlyArray<readonly [Impact, string]> = [
   ['low', 'Low'],
   ['medium', 'Med'],
   ['high', 'High'],
+]
+export const RISK_KINDS: ReadonlyArray<readonly [RiskKind, string]> = [
+  ['risk', 'Risk'],
+  ['issue', 'Issue'],
 ]
 export const ZOOMS: readonly Zoom[] = ['day', 'week', 'month']

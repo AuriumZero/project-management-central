@@ -1,6 +1,6 @@
 import { fromDay, isValidDate, today } from './dates'
 import { keepManualStarts, schedule } from './plan'
-import { IMPACTS, LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
+import { IMPACTS, LINK_TYPES, RISK_KINDS, PRIORITIES, STATUSES, TICKET_TYPES, ZOOMS } from './types'
 import type { AppState, Dependency, Project, Risk, Task, Ticket } from './types'
 
 /** Same key as the original single-file version, so saved data carries over (older shapes are upgraded on load). */
@@ -43,7 +43,8 @@ export function seedState(todayDay = today()): AppState {
     ticket(6, 'Export product copy from old CMS', 'doing', 'low', 'chore', id.content, 13),
     ticket(7, 'Set up analytics events', 'backlog', 'low', 'task', id.frontend),
   ]
-  const risk = (name: string, impact: Risk['impact'], likelihood: number, notes: string): Risk => ({ id: makeId(), name, impact, likelihood, notes })
+  const risk = (name: string, impact: Risk['impact'], likelihood: number, notes: string): Risk =>
+    ({ id: makeId(), name, kind: likelihood >= 100 ? 'issue' : 'risk', impact, likelihood, notes })
   const risks: Risk[] = [
     risk('Content owners are slow to sign off copy', 'high', 60, 'Migration can\'t finish without approved copy. Ask each owner for a named deputy.'),
     risk('Old blog URLs break on launch', 'medium', 40, 'Redirect map is in ticket WEB-5.'),
@@ -143,6 +144,8 @@ export function parseBackup(text: string): AppState | string {
     const risks: Risk[] = (Array.isArray(p.risks) ? p.risks : []).filter(isObj).map((r) => ({
       id: str(r.id, makeId()),
       name: str(r.name),
+      // Logs saved before the column existed: something certain to happen is an issue.
+      kind: oneOf(RISK_KINDS.map(([k]) => k), r.kind, Number(r.likelihood) >= 100 ? 'issue' : 'risk'),
       impact: oneOf(IMPACTS.map(([i]) => i), r.impact, 'medium'),
       likelihood: Math.min(100, Math.max(0, Math.round(Number(r.likelihood) || 0))),
       notes: str(r.notes),

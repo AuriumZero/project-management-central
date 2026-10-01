@@ -193,14 +193,15 @@ function risksSheet(project: Project): Sheet {
   const impact = { low: 'impactLow', medium: 'impactMedium', high: 'impactHigh' } as const
   return {
     name: 'Risks & issues',
-    cols: [6, 40, 10, 12, 70],
+    cols: [6, 40, 10, 10, 12, 70],
     freeze: { rows: 1, cols: 0 },
-    autoFilter: `A1:E${project.risks.length + 1}`,
+    autoFilter: `A1:F${project.risks.length + 1}`,
     rows: [
-      ['ID', 'Risk or issue', 'Impact', 'Likelihood', 'Notes'].map((h, i) => cell(h, i === 2 || i === 3 ? 'headCenter' : 'head')),
+      ['ID', 'Risk or issue', 'Type', 'Impact', 'Likelihood', 'Notes'].map((h, i) => cell(h, i >= 2 && i <= 4 ? 'headCenter' : 'head')),
       ...project.risks.map((r, i) => [
         cell(`R${i + 1}`, 'riskNum'),
         cell(r.name, 'riskText'),
+        cell(r.kind === 'issue' ? 'Issue' : 'Risk', 'riskNum'),
         cell(IMPACTS.find(([v]) => v === r.impact)?.[1] ?? r.impact, impact[r.impact]),
         cell(r.likelihood / 100, 'riskPct'),
         cell(r.notes, 'riskText'),

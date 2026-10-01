@@ -71,7 +71,7 @@ describe('parseBackup', () => {
     ], risks: [{ id: 'r', name: 'R', impact: 'severe', likelihood: 140 }] }] })
     const old = parseBackup(backup(2)) as AppState
     expect(old.projects[0].tasks[1]).toMatchObject({ start: '2026-10-20', pin: '2026-10-20' })
-    expect(old.projects[0].risks).toEqual([{ id: 'r', name: 'R', impact: 'medium', likelihood: 100, notes: '' }])
+    expect(old.projects[0].risks).toEqual([{ id: 'r', name: 'R', kind: 'issue', impact: 'medium', likelihood: 100, notes: '' }])
     const current = parseBackup(backup(3)) as AppState
     expect(current.projects[0].tasks[1]).toMatchObject({ start: '2026-10-03' })
   })

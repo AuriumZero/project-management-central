@@ -1,10 +1,11 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, Dispatch, InputHTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
+import type { ClipboardEvent, CSSProperties, Dispatch, InputHTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
 import { formatDay, fromDay, spanDays, toDay, today } from '../lib/dates'
 import { workdaysBetween } from '../lib/calendar'
 import type { WorkWeek } from '../lib/calendar'
 import { dropsLinks, duration, formatPredecessors, outline, parsePredecessors, projectSummary } from '../lib/plan'
 import type { OutlineRow } from '../lib/plan'
+import { parseClipboard, parseDateText, parsePercent } from '../lib/paste'
 import { dragOffsets, ganttLayout, ROW_HEIGHT } from '../lib/schedule'
 import type { ChartRow, DragMode } from '../lib/schedule'
 import type { Project, Task } from '../lib/types'
@@ -171,6 +172,45 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
 
   useImperativeHandle(ref, () => ({ scrollToToday, addTask }))
 
+  // Pasting cells copied from Excel fills this row and the ones below, column by
+  // column from where you pasted, and adds tasks when it runs past the end, so a
+  // column of names becomes that many tasks. It's one step to undo.
+  const pasteRows = (e: ClipboardEvent<HTMLDivElement>) => {
+    const field = e.target as HTMLElement
+    const grid = parseClipboard(e.clipboardData.getData('text/plain'))
+    const column = field.closest('[role=gridcell]')?.className.split(' ')[0] ?? ''
+    const id = field.closest<HTMLElement>('[role=row]')?.dataset.id
+    const columns = PASTE_COLUMNS.filter((c) => c === 'c-name' || col.show)
+    if (!grid || !id || !columns.includes(column)) return
+    e.preventDefault()
+    field.blur()
+    const start = visible.findIndex((r) => r.task.id === id)
+    const first = columns.indexOf(column)
+    const parentId = visible.at(-1)!.task.parentId
+    const actions: Action[] = []
+    const created: Task[] = []
+    let skipped = 0
+    grid.forEach((cells, i) => {
+      let target = visible[start + i]?.task
+      if (!target) {
+        target = { ...newTask({ ...project, tasks: [...tasks, ...created] }, parentId), name: 'New task' }
+        created.push(target)
+        actions.push({ type: 'saveTask', task: target })
+      }
+      const patch: Partial<Task> & { days?: number } = {}
+      cells.slice(0, columns.length - first).forEach((text, j) => {
+        const value = pastedTaskValue(columns[first + j], text, target.id, idByNum)
+        if (value) Object.assign(patch, value)
+        else if (text.trim()) skipped++
+      })
+      if (patch.end && toDay(patch.end) < toDay(patch.start ?? target.start)) { delete patch.end; skipped++ }
+      actions.push({ type: 'updateTask', id: target.id, patch })
+    })
+    dispatch({ type: 'batch', actions })
+    toast(`Pasted ${grid.length} row${grid.length === 1 ? '' : 's'}${created.length ? `, adding ${created.length} task${created.length === 1 ? '' : 's'}` : ''}.`
+      + (skipped ? ` ${skipped} value${skipped === 1 ? " wasn't" : "s weren't"} understood and ${skipped === 1 ? 'was' : 'were'} skipped.` : ''))
+  }
+
   // Enter saves a cell and moves to the same column one row down (Shift+Enter: up), like a
   // spreadsheet. Enter on the last task, in any column, adds a new task below it at the same
   // level and puts the cursor in its name.
@@ -332,6 +372,7 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
              style={{ '--full': `${full}px` } as CSSProperties}
              onScroll={(e) => { if (headClip.current) headClip.current.scrollLeft = e.currentTarget.scrollLeft }}
              onKeyDown={enterToNextRow}
+             onPaste={pasteRows}
            >
             {summary && (
               <ProjectRow project={project} summary={summary} show={col.show} dispatch={dispatch} />
@@ -415,6 +456,30 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
       {tip && drag && <div className="drag-tip" style={{ left: drag.x + 12, top: drag.y + 14 }}>{tip}</div>}
     </div>
   )
+}
+
+/** Grid columns a paste fills, left to right. */
+const PASTE_COLUMNS = ['c-name', 'c-start', 'c-finish', 'c-days', 'c-preds', 'c-assignee', 'c-pct']
+
+/** Turns one pasted cell into a change to a task, or null when it can't be read. */
+function pastedTaskValue(column: string, text: string, id: string, idByNum: Map<number, string>): (Partial<Task> & { days?: number }) | null {
+  const t = text.trim()
+  switch (column) {
+    case 'c-name': return t ? { name: t } : null
+    case 'c-start': { const d = parseDateText(t); return d ? { start: d } : null }
+    case 'c-finish': { const d = parseDateText(t); return d ? { end: d } : null }
+    case 'c-days': {
+      const n = Math.round(Number(t.replace(/\s*(d|days?)$/i, '')))
+      return t && Number.isFinite(n) && n >= 1 ? { days: n } : null
+    }
+    case 'c-preds': {
+      const deps = parsePredecessors(t, idByNum, id)
+      return typeof deps === 'string' ? null : { deps }
+    }
+    case 'c-assignee': return { assignee: t }
+    case 'c-pct': { const n = parsePercent(t); return n === null ? null : { progress: n } }
+    default: return null
+  }
 }
 
 /** A text input that saves when you leave it or press Enter, and reverts on Escape. */

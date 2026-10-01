@@ -1,8 +1,9 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
-import type { Dispatch, KeyboardEvent, Ref } from 'react'
+import type { ClipboardEvent, Dispatch, KeyboardEvent, Ref } from 'react'
+import { parseClipboard, parsePercent } from '../lib/paste'
 import { makeId } from '../lib/storage'
-import { IMPACTS } from '../lib/types'
-import type { Impact, Project, Risk } from '../lib/types'
+import { IMPACTS, RISK_KINDS } from '../lib/types'
+import type { Impact, Project, Risk, RiskKind } from '../lib/types'
 import type { Action } from '../state/reducer'
 
 export interface RiskLogHandle {
@@ -17,15 +18,112 @@ interface RiskLogProps {
   ref?: Ref<RiskLogHandle>
 }
 
+type SortKey = 'num' | 'name' | 'kind' | 'impact' | 'likelihood' | 'notes'
+interface Sort { key: SortKey; dir: 1 | -1 }
+
+const COLUMNS: { key: SortKey; cls: string; label: string; title?: string }[] = [
+  { key: 'num', cls: 'r-id', label: 'ID' },
+  { key: 'name', cls: 'r-name', label: 'Risk or issue' },
+  { key: 'kind', cls: 'r-kind', label: 'Type' },
+  { key: 'impact', cls: 'r-impact', label: 'Impact' },
+  { key: 'likelihood', cls: 'r-likely', label: 'Likelihood', title: "How likely it is to happen. An issue already has, so it's 100%." },
+  { key: 'notes', cls: 'r-notes', label: 'Notes' },
+]
+/** Columns a paste fills, left to right. */
+const PASTE_COLUMNS = ['r-name', 'r-kind', 'r-impact', 'r-likely', 'r-notes']
+
+const newRisk = (): Risk => ({ id: makeId(), name: 'New risk', kind: 'risk', impact: 'medium', likelihood: 50, notes: '' })
+
+/** Rows in the chosen order; ties keep the order they were logged in. */
+export function sortRisks(risks: Risk[], sort: Sort | null): Risk[] {
+  if (!sort) return risks
+  const rank: Record<SortKey, (r: Risk) => number | string> = {
+    num: (r) => risks.indexOf(r),
+    name: (r) => r.name.toLowerCase(),
+    kind: (r) => r.kind,
+    impact: (r) => IMPACTS.findIndex(([i]) => i === r.impact),
+    likelihood: (r) => r.likelihood,
+    notes: (r) => r.notes.toLowerCase(),
+  }
+  const key = rank[sort.key]
+  return [...risks].sort((a, b) => {
+    const x = key(a)
+    const y = key(b)
+    return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || risks.indexOf(a) - risks.indexOf(b)
+  })
+}
+
+/** Turns one pasted cell into a change, or null when it can't be read. */
+function pastedValue(column: string, text: string): Partial<Omit<Risk, 'id'>> | null {
+  const t = text.trim()
+  const lower = t.toLowerCase()
+  switch (column) {
+    case 'r-name': return t ? { name: t } : null
+    case 'r-kind': {
+      const kind = RISK_KINDS.find(([k, label]) => lower === k || lower === label.toLowerCase())?.[0]
+      return kind ? { kind } : null
+    }
+    case 'r-impact': {
+      const impact = IMPACTS.find(([i, label]) => lower === i || lower === label.toLowerCase() || (lower.length >= 3 && i.startsWith(lower)))?.[0]
+      return impact ? { impact } : null
+    }
+    case 'r-likely': {
+      const n = parsePercent(t)
+      return n === null ? null : { likelihood: n }
+    }
+    case 'r-notes': return { notes: text }
+    default: return null
+  }
+}
+
 export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
   const { risks } = project
   const table = useRef<HTMLTableElement>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
+  const [sort, setSort] = useState<Sort | null>(null)
+  const rows = sortRisks(risks, sort)
+  const numById = new Map(risks.map((r, i) => [r.id, i + 1]))
 
   const addRisk = () => {
-    const risk: Risk = { id: makeId(), name: 'New risk', impact: 'medium', likelihood: 50, notes: '' }
+    const risk = newRisk()
     dispatch({ type: 'addRisk', risk })
     setFocusId(risk.id)
+  }
+
+  const sortBy = (key: SortKey) =>
+    setSort((s) => (key === 'num' && s?.key === 'num' && s.dir === -1 ? null : { key, dir: s?.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))
+
+  // Pasting cells copied from Excel fills this row and the ones below, column by
+  // column from where you pasted, and adds rows when it runs past the end.
+  const onPaste = (e: ClipboardEvent<HTMLTableElement>) => {
+    const field = e.target as HTMLElement
+    const grid = parseClipboard(e.clipboardData.getData('text/plain'))
+    const column = field.closest('td')?.className.split(' ')[0] ?? ''
+    const id = field.closest<HTMLElement>('tr')?.dataset.id
+    if (!grid || !id || !PASTE_COLUMNS.includes(column)) return
+    e.preventDefault()
+    const start = rows.findIndex((r) => r.id === id)
+    const first = PASTE_COLUMNS.indexOf(column)
+    const actions: Action[] = []
+    let skipped = 0
+    grid.forEach((cells, i) => {
+      let target = rows[start + i]?.id
+      if (!target) {
+        const risk = newRisk()
+        actions.push({ type: 'addRisk', risk })
+        target = risk.id
+      }
+      const patch: Partial<Omit<Risk, 'id'>> = {}
+      cells.slice(0, PASTE_COLUMNS.length - first).forEach((text, j) => {
+        const value = pastedValue(PASTE_COLUMNS[first + j], text)
+        if (value) Object.assign(patch, value)
+        else if (text.trim()) skipped++
+      })
+      actions.push({ type: 'updateRisk', id: target, patch })
+    })
+    field.blur()
+    dispatch({ type: 'batch', actions })
+    toast(`Pasted ${grid.length} row${grid.length === 1 ? '' : 's'}.${skipped ? ` ${skipped} value${skipped === 1 ? " wasn't" : "s weren't"} understood and ${skipped === 1 ? 'was' : 'were'} left as they were.` : ''}`)
   }
   useImperativeHandle(ref, () => ({ addRisk }))
 
@@ -66,7 +164,7 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
     return (
       <div className="blank">
         <h2>No risks or issues logged</h2>
-        <p>Log anything that could hurt the plan, how bad it would be, and how likely it is. Something that has already happened is an issue: give it a likelihood of 100%.</p>
+        <p>Log anything that could hurt the plan, how bad it would be, and how likely it is. Mark something that has already happened as an issue. You can also paste rows copied from Excel.</p>
         <button className="btn primary" onClick={addRisk}>Add the first risk</button>
       </div>
     )
@@ -74,19 +172,22 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
 
   return (
     <div className="risks">
-      <table className="risk-table" ref={table} onKeyDown={onKeyDown} aria-label="Risks and issues">
+      <table className="risk-table" ref={table} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Risks and issues">
         <thead>
           <tr>
-            <th className="r-id">ID</th>
-            <th className="r-name">Risk or issue</th>
-            <th className="r-impact">Impact</th>
-            <th className="r-likely" title="How likely it is to happen. 100% means it already has, so it's an issue.">Likelihood</th>
-            <th className="r-notes">Notes</th>
+            {COLUMNS.map((c) => (
+              <th key={c.key} className={c.cls} title={c.title} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+                <button className="sort" onClick={() => sortBy(c.key)}>
+                  {c.label}
+                  <span className="sort-mark" aria-hidden="true">{sort?.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}</span>
+                </button>
+              </th>
+            ))}
             <th className="r-actions"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
-          {risks.map((risk, i) => <RiskRow key={risk.id} risk={risk} num={i + 1} dispatch={dispatch} toast={toast} />)}
+          {rows.map((risk) => <RiskRow key={risk.id} risk={risk} num={numById.get(risk.id)!} dispatch={dispatch} toast={toast} />)}
         </tbody>
       </table>
       <div className="g-add">
@@ -117,6 +218,17 @@ function RiskRow({ risk, num, dispatch, toast }: { risk: Risk; num: number; disp
       <td className="r-id mono">R{num}</td>
       <td className="r-name">
         <TextCell value={risk.name} label={`Risk ${num}`} onCommit={(v) => v.trim() ? update({ name: v.trim() }) : toast('A risk needs a name.')} />
+      </td>
+      <td className="r-kind">
+        <select
+          className="cell kind"
+          data-kind={risk.kind}
+          value={risk.kind}
+          aria-label={`Type of ${name}`}
+          onChange={(e) => update({ kind: e.target.value as RiskKind, ...(e.target.value === 'issue' ? { likelihood: 100 } : {}) })}
+        >
+          {RISK_KINDS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
       </td>
       <td className="r-impact">
         <select
