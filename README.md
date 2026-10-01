@@ -12,7 +12,7 @@ A personal project planner with a Gantt chart and a ticket board, built with Rea
 ## Features
 
 - **A plan that works like Microsoft Project.** The plan is an editable table next to the Gantt chart. You type names, start and finish dates, durations, predecessors, assignees and % complete straight into the grid. You can drag the divider to give the chart more room.
-- **Quick task entry.** + Task adds a blank row with the cursor in its name, and Tab goes straight on to Start, Days, Predecessors and Assignee, so you can type a plan without opening a dialog.
+- **Quick task entry.** + Task adds a blank row with the cursor in its name, and Tab goes straight on to Start, Days, Predecessors and Assignee, so you can type a plan without opening a dialog. Enter moves down a column like a spreadsheet (Shift+Enter moves up), and Enter in the last task's name adds another task, so you can type a whole list of tasks in one go.
 - **Three levels of task.** Row 0 is the whole project, rolled up from everything below it. Parent tasks are the big deliverables and milestones. Subtasks sit under a parent and have an assignee. A parent's dates and progress come from its subtasks, and you can fold a parent to hide them.
 - **Dependencies with link types.** You can use finish-to-start, start-to-start, finish-to-finish and start-to-finish links, with lag or lead in working days. Enter them as `3, 5SS+2d` in the Predecessors column, pick them in the task dialog (predecessors and successors), or drag from the dot at the end of one bar onto another.
 - **Auto-scheduling.** When a task moves or grows, its successors are pushed later to keep every link true. Moving a parent moves all of its subtasks. Links that would create a loop are refused.

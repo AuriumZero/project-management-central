@@ -50,6 +50,36 @@ describe('App', () => {
     expect(toDay(saved.end)).toBe(addWorkdays(toDay(saved.start), 2, 'weekdays'))
   })
 
+  it('types several tasks in a row by pressing Enter', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: '+ Task' }))
+    await user.keyboard('Brief agency{Enter}Book venue{Enter}Send invites')
+    const names = loadState()!.projects[0].tasks.map((t) => t.name)
+    expect(names.slice(-3)).toEqual(['Brief agency', 'Book venue', 'New task'])
+    expect(screen.getByDisplayValue('Send invites')).toHaveFocus()
+  })
+
+  it('moves down and up a column with Enter and Shift+Enter', async () => {
+    const user = renderApp()
+    await user.click(screen.getByDisplayValue('Wireframes'))
+    await user.keyboard('{Enter}')
+    expect(screen.getByDisplayValue('Visual design')).toHaveFocus()
+    await user.keyboard('{Shift>}{Enter}{/Shift}')
+    expect(screen.getByDisplayValue('Wireframes')).toHaveFocus()
+  })
+
+  it('adds a sibling subtask when Enter is pressed on the last subtask', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Delete Launch' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm delete Launch' }))
+    await user.click(screen.getByDisplayValue('QA & fixes'))
+    await user.keyboard('{Enter}')
+    expect(screen.getByDisplayValue('New subtask')).toHaveFocus()
+    const saved = loadState()!.projects[0].tasks
+    const build = saved.find((t) => t.name === 'Build')!
+    expect(saved.find((t) => t.name === 'New subtask')).toMatchObject({ parentId: build.id })
+  })
+
   it('refuses an edit that ends before it starts', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))
