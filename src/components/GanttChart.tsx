@@ -172,7 +172,8 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
   useImperativeHandle(ref, () => ({ scrollToToday, addTask }))
 
   // Enter saves a cell and moves to the same column one row down (Shift+Enter: up), like a
-  // spreadsheet. Enter in the last task's name adds a new task below it at the same level.
+  // spreadsheet. Enter on the last task, in any column, adds a new task below it at the same
+  // level and puts the cursor in its name.
   const enterToNextRow = (e: KeyboardEvent<HTMLDivElement>) => {
     const input = e.target as HTMLElement
     if (e.key !== 'Enter' || !input.matches('input.cell')) return
@@ -187,7 +188,7 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
         return
       }
     }
-    if (!e.shiftKey && column === 'c-name' && row.dataset.id) addTask(row.dataset.parent ?? '')
+    if (!e.shiftKey && row.dataset.id) addTask(row.dataset.parent ?? '')
   }
 
   // Start each project and zoom level with today in view.
@@ -520,6 +521,14 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
           >{task.collapsed ? '▸' : '▾'}</button>
         ) : <span className="twisty-gap">{task.milestone ? '◆' : ''}</span>}
         <Cell value={task.name} label={`Name of row ${num}`} className="name" onKeyDown={tabToStart} onCommit={(v) => v.trim() ? update({ name: v.trim() }) : toast('A task needs a name.')} />
+        {task.pin && (
+          <button
+            className="pin-btn"
+            onClick={() => dispatch({ type: 'unpinTask', id: task.id })}
+            aria-label={`Let ${name} follow its predecessors again`}
+            title={`Start set by hand: no earlier than ${formatDay(toDay(task.pin), { month: 'short', day: 'numeric' })}. Click to follow the predecessors again.`}
+          >📌</button>
+        )}
       </span>
       <span className="c-actions" role="gridcell">
         {armed ? (

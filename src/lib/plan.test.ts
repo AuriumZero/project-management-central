@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  dropsLinks, formatPredecessors, outline, parsePredecessors, projectSummary, requiredDelay, rollup, sanitize, schedule,
+  dropsLinks, formatPredecessors, keepManualStarts, outline, parsePredecessors, projectSummary, requiredDelay, rollup, sanitize, schedule,
 } from './plan'
 import { toDay } from './dates'
 import type { Dependency, LinkType, Task } from './types'
@@ -83,15 +83,29 @@ describe('schedule', () => {
     expect(get(tasks, 'c')).toMatchObject({ start: '2026-10-10', end: '2026-10-10' })
   })
 
-  it('never pulls a task earlier than where you put it', () => {
+  it('pulls a linked task in to start right after its predecessor', () => {
     const tasks = schedule([
       task('a', '2026-10-01', '2026-10-02'),
       task('b', '2026-10-20', '2026-10-21', { deps: [link('a')] }),
     ])
-    expect(get(tasks, 'b').start).toBe('2026-10-20')
+    expect(get(tasks, 'b')).toMatchObject({ start: '2026-10-03', end: '2026-10-04' })
   })
 
-  it('moves all of a parent’s subtasks when the parent has to wait', () => {
+  it('keeps a start set by hand, but still pushes it later when it has to', () => {
+    const pinned = [
+      task('a', '2026-10-01', '2026-10-02'),
+      task('b', '2026-10-20', '2026-10-21', { deps: [link('a')], pin: '2026-10-20' }),
+    ]
+    expect(get(schedule(pinned), 'b').start).toBe('2026-10-20')
+    const late = schedule([{ ...pinned[0], end: '2026-10-25' }, pinned[1]])
+    expect(get(late, 'b')).toMatchObject({ start: '2026-10-26', end: '2026-10-27' })
+  })
+
+  it('drops a pin from a task with no links', () => {
+    expect(get(schedule([task('a', '2026-10-05', '2026-10-06', { pin: '2026-10-05' })]), 'a').pin).toBeUndefined()
+  })
+
+  it('starts a parent’s subtasks after the parent’s predecessor', () => {
     const tasks = schedule([
       task('design', '2026-10-01', '2026-10-10'),
       task('build', '2026-10-05', '2026-10-09', { deps: [link('design')] }),
@@ -99,8 +113,19 @@ describe('schedule', () => {
       task('be', '2026-10-06', '2026-10-09', { parentId: 'build' }),
     ])
     expect(get(tasks, 'fe')).toMatchObject({ start: '2026-10-11', end: '2026-10-13' })
-    expect(get(tasks, 'be')).toMatchObject({ start: '2026-10-12', end: '2026-10-15' })
-    expect(get(tasks, 'build')).toMatchObject({ start: '2026-10-11', end: '2026-10-15' })
+    expect(get(tasks, 'be')).toMatchObject({ start: '2026-10-11', end: '2026-10-14' })
+    expect(get(tasks, 'build')).toMatchObject({ start: '2026-10-11', end: '2026-10-14' })
+  })
+
+  it('pins tasks with a hand-made gap when upgrading an older plan', () => {
+    const kept = keepManualStarts([
+      task('a', '2026-10-01', '2026-10-02'),
+      task('b', '2026-10-20', '2026-10-21', { deps: [link('a')] }),
+      task('c', '2026-10-03', '2026-10-04', { deps: [link('a')] }),
+    ], 'all')
+    expect(get(kept, 'b').pin).toBe('2026-10-20')
+    expect(get(kept, 'c').pin).toBeUndefined()
+    expect(get(schedule(kept), 'b').start).toBe('2026-10-20')
   })
 
   it('uses a parent’s rolled-up finish when it is the predecessor', () => {

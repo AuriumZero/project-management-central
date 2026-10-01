@@ -2,6 +2,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { BackupDialog, ProjectDialog, RestoreDialog, TaskDialog, TicketDialog } from './components/Dialogs'
 import { GanttChart } from './components/GanttChart'
 import type { GanttHandle } from './components/GanttChart'
+import { RiskLog } from './components/RiskLog'
+import type { RiskLogHandle } from './components/RiskLog'
 import { TicketBoard } from './components/TicketBoard'
 import type { TicketFilters } from './components/TicketBoard'
 import type { WorkWeek } from './lib/calendar'
@@ -39,6 +41,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
   const [filters, setFilters] = useState<TicketFilters>({ query: '', type: '' })
   const [toastMsg, setToastMsg] = useState('')
   const gantt = useRef<GanttHandle>(null)
+  const risks = useRef<RiskLogHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const warnedStorage = useRef(false)
   const project = currentProject(state)
@@ -143,8 +146,9 @@ export default function App({ initialState }: { initialState?: AppState }) {
             <ProjectHeader project={project} onEdit={() => setDialog({ kind: 'project', isNew: false })} />
             <div className="toolbar">
               <div className="tabs" role="tablist" aria-label="View">
-                <button role="tab" aria-selected={project.view !== 'board'} onClick={() => dispatch({ type: 'setView', view: 'gantt' })}>Plan &amp; Gantt</button>
+                <button role="tab" aria-selected={project.view === 'gantt'} onClick={() => dispatch({ type: 'setView', view: 'gantt' })}>Plan &amp; Gantt</button>
                 <button role="tab" aria-selected={project.view === 'board'} onClick={() => dispatch({ type: 'setView', view: 'board' })}>Tickets</button>
+                <button role="tab" aria-selected={project.view === 'risks'} onClick={() => dispatch({ type: 'setView', view: 'risks' })}>Risks &amp; issues</button>
               </div>
               <div className="tools">
                 {project.view === 'board' ? (
@@ -167,6 +171,15 @@ export default function App({ initialState }: { initialState?: AppState }) {
                       {TICKET_TYPES.map((t) => <option key={t} value={t}>{capitalize(t)}</option>)}
                     </select>
                     <button className="btn primary" onClick={() => setDialog({ kind: 'ticket' })}>+ Ticket</button>
+                  </>
+                ) : project.view === 'risks' ? (
+                  <>
+                    <div className="seg" role="group" aria-label="History">
+                      <button disabled={!history.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo (Ctrl+Z)">Undo</button>
+                      <button disabled={!history.future.length} onClick={() => dispatch({ type: 'redo' })} title="Redo (Ctrl+Shift+Z)">Redo</button>
+                    </div>
+                    <button className="btn" onClick={() => void exportExcel()} disabled={!project.tasks.length && !project.risks.length} title="Download the plan, Gantt chart and risk log as an Excel file">Export to Excel</button>
+                    <button className="btn primary" onClick={() => risks.current?.addRisk()}>+ Risk</button>
                   </>
                 ) : (
                   <>
@@ -193,7 +206,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
                       {details ? 'Hide columns' : 'Show columns'}
                     </button>
                     <button className="btn" onClick={() => gantt.current?.scrollToToday()}>Today</button>
-                    <button className="btn" onClick={() => void exportExcel()} disabled={!project.tasks.length} title="Download the task table and Gantt chart as an Excel file">Export to Excel</button>
+                    <button className="btn" onClick={() => void exportExcel()} disabled={!project.tasks.length && !project.risks.length} title="Download the plan, Gantt chart and risk log as an Excel file">Export to Excel</button>
                     <button className="btn primary" onClick={() => gantt.current?.addTask()}>+ Task</button>
                   </>
                 )}
@@ -207,6 +220,8 @@ export default function App({ initialState }: { initialState?: AppState }) {
                 onOpen={(ticket) => setDialog({ kind: 'ticket', ticket })}
                 onNew={(status) => setDialog({ kind: 'ticket', status })}
               />
+            ) : project.view === 'risks' ? (
+              <RiskLog ref={risks} project={project} dispatch={dispatch} toast={toast} />
             ) : (
               <GanttChart
                 ref={gantt}

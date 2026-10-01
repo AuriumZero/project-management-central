@@ -80,6 +80,31 @@ describe('App', () => {
     expect(saved.find((t) => t.name === 'New subtask')).toMatchObject({ parentId: build.id })
   })
 
+  it('adds a task from any column when Enter is pressed on the last row', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    await user.click(screen.getByLabelText('Assignee of Launch'))
+    await user.keyboard('{Enter}')
+    expect(screen.getByDisplayValue('New task')).toHaveFocus()
+  })
+
+  it('logs risks in their own tab, typed in like tasks', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('tab', { name: 'Risks & issues' }))
+    await user.click(screen.getByRole('button', { name: '+ Risk' }))
+    expect(screen.getByDisplayValue('New risk')).toHaveFocus()
+    await user.keyboard('Venue cancels')
+    await user.tab()
+    await user.selectOptions(screen.getByLabelText('Impact of Venue cancels'), 'high')
+    const likely = screen.getByLabelText('Likelihood of Venue cancels, in percent')
+    await user.clear(likely)
+    await user.type(likely, '25')
+    await user.type(screen.getByLabelText('Notes for Venue cancels'), 'Backup venue on hold{Enter}')
+    expect(screen.getByDisplayValue('New risk')).toHaveFocus()
+    const risk = loadState()!.projects[0].risks.find((r) => r.name === 'Venue cancels')
+    expect(risk).toMatchObject({ impact: 'high', likelihood: 25, notes: 'Backup venue on hold' })
+  })
+
   it('refuses an edit that ends before it starts', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))

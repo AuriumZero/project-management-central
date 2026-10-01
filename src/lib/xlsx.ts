@@ -16,6 +16,9 @@ export interface CellStyle {
   indent?: number
   /** A thin line under the cell. */
   underline?: string
+  /** Wrap long text onto more lines, making the row taller. */
+  wrap?: boolean
+  valign?: 'top' | 'center'
 }
 
 export interface Cell {
@@ -83,7 +86,7 @@ function stylesXml(styles: CellStyle[]): string {
     const fill = s.fill ? add(fills, `<fill><patternFill patternType="solid"><fgColor rgb="${argb(s.fill)}"/><bgColor indexed="64"/></patternFill></fill>`) : 0
     const border = s.underline ? add(borders, `<border><left/><right/><top/><bottom style="thin"><color rgb="${argb(s.underline)}"/></bottom><diagonal/></border>`) : 0
     const fmt = s.numFmt ? 164 + add(fmts, s.numFmt) : 0
-    const align = s.align || s.indent ? `<alignment vertical="center"${s.align ? ` horizontal="${s.align}"` : ''}${s.indent ? ` indent="${s.indent}"` : ''}/>` : '<alignment vertical="center"/>'
+    const align = `<alignment vertical="${s.valign ?? 'center'}"${s.align ? ` horizontal="${s.align}"` : ''}${s.indent ? ` indent="${s.indent}"` : ''}${s.wrap ? ' wrapText="1"' : ''}/>`
     xfs.push(`<xf numFmtId="${fmt}" fontId="${font}" fillId="${fill}" borderId="${border}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">${align}</xf>`)
   }
   const numFmts = fmts.length

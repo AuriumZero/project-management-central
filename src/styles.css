@@ -212,6 +212,8 @@ textarea.backup { min-height: 160px; font-size: 11px }
 .row-btn.danger:hover { color: var(--p-urgent) }
 .row-btn.confirm { width: auto; padding: 0 8px; color: var(--surface); background: var(--p-urgent); font-size: 12px; font-weight: 600 }
 .row-btn-gap { flex: none; width: 26px }
+.pin-btn { flex: none; width: 22px; height: 22px; border: 1px solid transparent; background: none; border-radius: 4px; padding: 0; font-size: 11px; line-height: 1; opacity: .75 }
+.pin-btn:hover { border-color: var(--line); background: var(--surface); opacity: 1 }
 .g-add { padding-left: calc(var(--c-id) + 4px) }
 
 /* Summary bars: the project row and parents with subtasks */
@@ -249,3 +251,24 @@ fieldset.links { display: flex; flex-direction: column; gap: 6px }
 .g-split:hover::after { background: var(--accent) }
 .cell[type=number] { -moz-appearance: textfield; appearance: textfield }
 .cell[type=number]::-webkit-inner-spin-button, .cell[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0 }
+
+/* Risk and issue log */
+.risks { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto }
+.risk-table { width: 100%; min-width: 720px; border-collapse: collapse; table-layout: fixed }
+.risk-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 10px 6px; border-bottom: 1px solid var(--line); background: var(--sunk) }
+.risk-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top }
+.risk-table .r-id { width: 52px; color: var(--muted); font-size: 12px; padding-top: 11px }
+.risk-table th.r-id { padding-top: 10px }
+.risk-table .r-name { width: 30% }
+.risk-table .r-impact { width: 96px }
+.risk-table .r-likely { width: 104px }
+.risk-table .r-actions { width: 48px; text-align: right }
+.risk-table select.cell { padding: 4px 3px; font-weight: 600 }
+.risk-table select.cell:hover { border-color: var(--line) }
+.cell.impact[data-impact=low] { color: var(--p-low) }
+.cell.impact[data-impact=medium] { color: var(--p-high) }
+.cell.impact[data-impact=high] { color: var(--p-urgent) }
+.pct { display: flex; align-items: center; gap: 2px; color: var(--muted); font-size: 12px }
+.pct .cell { width: 52px; text-align: right }
+.cell.notes { display: block; resize: none; overflow: hidden; font: inherit; font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere }
+.risks .g-add { padding: 8px 6px }

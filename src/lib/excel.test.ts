@@ -13,7 +13,14 @@ describe('Excel export', () => {
   const gantt = files.get('xl/worksheets/sheet2.xml')!
 
   it('has a task sheet and a Gantt chart sheet', () => {
-    expect(files.get('xl/workbook.xml')).toMatch(/<sheet name="Tasks".*<sheet name="Gantt chart"/)
+    expect(files.get('xl/workbook.xml')).toMatch(/<sheet name="Tasks".*<sheet name="Gantt chart".*<sheet name="Risks &amp; issues"/)
+  })
+
+  it('logs every risk with its impact, likelihood and wrapped notes', () => {
+    const risks = files.get('xl/worksheets/sheet3.xml')!
+    for (const r of project.risks) expect(risks).toContain(`<v>${r.likelihood / 100}</v>`)
+    expect(risks).toContain('>High</t>')
+    expect(files.get('xl/styles.xml')).toContain('wrapText="1"')
   })
 
   it('lists the project, every task and the links both ways', () => {

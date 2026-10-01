@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { toDay } from './dates'
+import type { AppState } from './types'
 import { loadState, parseBackup, saveState, seedState, STORAGE_KEY } from './storage'
 
 const memory = () => {
@@ -61,6 +62,18 @@ describe('parseBackup', () => {
     expect(parsed.projects[0]).not.toHaveProperty('_scroll')
     expect(parsed.projects[0].tickets[0]).toMatchObject({ status: 'doing', taskId: 't1' })
     expect(parsed.projects[0].tasks[0]).toMatchObject({ parentId: '', assignee: '', deps: [] })
+  })
+
+  it('keeps hand-made gaps after predecessors when upgrading, and reads risks', () => {
+    const backup = (v: number) => JSON.stringify({ v, projects: [{ id: 'p', name: 'P', workWeek: 'all', tasks: [
+      { id: 'a', name: 'A', start: '2026-10-01', end: '2026-10-02', deps: [] },
+      { id: 'b', name: 'B', start: '2026-10-20', end: '2026-10-21', deps: [{ id: 'a', type: 'FS', lag: 0 }] },
+    ], risks: [{ id: 'r', name: 'R', impact: 'severe', likelihood: 140 }] }] })
+    const old = parseBackup(backup(2)) as AppState
+    expect(old.projects[0].tasks[1]).toMatchObject({ start: '2026-10-20', pin: '2026-10-20' })
+    expect(old.projects[0].risks).toEqual([{ id: 'r', name: 'R', impact: 'medium', likelihood: 100, notes: '' }])
+    const current = parseBackup(backup(3)) as AppState
+    expect(current.projects[0].tasks[1]).toMatchObject({ start: '2026-10-03' })
   })
 
   it('repairs bad values instead of failing', () => {
