@@ -4,7 +4,7 @@ import type { AppState, Task, Ticket } from '../lib/types'
 import { currentProject, reducer } from './reducer'
 
 const empty = (): AppState => reducer({ v: 2, current: undefined, projects: [] },
-  { type: 'createProject', project: { id: 'p', name: 'P', key: 'P', description: '' } })
+  { type: 'createProject', project: { id: 'p', name: 'P', key: 'P', description: '', workWeek: 'all' } })
 
 const task = (id: string, extra: Partial<Task> = {}): Task =>
   ({ id, name: id, start: '2026-10-01', end: '2026-10-05', progress: 0, deps: [], parentId: '', assignee: '', ...extra })
@@ -18,6 +18,47 @@ describe('reducer', () => {
     const s = empty()
     expect(s.current).toBe('p')
     expect(currentProject(s)).toMatchObject({ tasks: [], tickets: [], seq: 0, view: 'gantt', zoom: 'day' })
+  })
+
+  it('skips weekends by default in new projects', () => {
+    const s = reducer({ v: 2, current: undefined, projects: [] }, { type: 'createProject', project: { id: 'w', name: 'W', key: 'W', description: '' } })
+    expect(currentProject(s)!.workWeek).toBe('weekdays')
+  })
+
+  describe('on a Monday-to-Friday calendar', () => {
+    // 2026-10-02 is a Friday.
+    const weekdays = () => reducer(empty(), { type: 'setWorkWeek', workWeek: 'weekdays' })
+
+    it('counts days in working days and steps over the weekend', () => {
+      let s = reducer(weekdays(), { type: 'saveTask', task: task('a', { start: '2026-10-01', end: '2026-10-01' }) })
+      s = reducer(s, { type: 'updateTask', id: 'a', patch: { days: 3 } })
+      expect(currentProject(s)!.tasks[0]).toMatchObject({ start: '2026-10-01', end: '2026-10-05' })
+    })
+
+    it('keeps the working-day length when the start moves', () => {
+      let s = reducer(weekdays(), { type: 'saveTask', task: task('a', { start: '2026-10-01', end: '2026-10-05' }) })
+      s = reducer(s, { type: 'updateTask', id: 'a', patch: { start: '2026-10-02' } })
+      expect(currentProject(s)!.tasks[0]).toMatchObject({ start: '2026-10-02', end: '2026-10-06' })
+    })
+
+    it('moves a task that lands on a weekend to Monday', () => {
+      let s = reducer(weekdays(), { type: 'saveTask', task: task('a', { start: '2026-10-02', end: '2026-10-02' }) })
+      s = reducer(s, { type: 'shiftTask', id: 'a', start: 1, end: 1 })
+      expect(currentProject(s)!.tasks[0]).toMatchObject({ start: '2026-10-05', end: '2026-10-05' })
+    })
+
+    it('starts a finish-to-start successor on the next working day', () => {
+      let s = reducer(weekdays(), { type: 'saveTask', task: task('a', { start: '2026-10-01', end: '2026-10-02' }) })
+      s = reducer(s, { type: 'saveTask', task: task('b', { start: '2026-10-01', end: '2026-10-02', deps: [{ id: 'a', type: 'FS', lag: 0 }] }) })
+      expect(currentProject(s)!.tasks[1]).toMatchObject({ start: '2026-10-05', end: '2026-10-06' })
+    })
+
+    it('can switch to counting every day', () => {
+      let s = reducer(weekdays(), { type: 'saveTask', task: task('a', { start: '2026-10-02', end: '2026-10-05' }) })
+      s = reducer(s, { type: 'setWorkWeek', workWeek: 'all' })
+      s = reducer(s, { type: 'shiftTask', id: 'a', start: 1, end: 1 })
+      expect(currentProject(s)!.tasks[0]).toMatchObject({ start: '2026-10-03', end: '2026-10-06' })
+    })
   })
 
   it('only changes the current project', () => {

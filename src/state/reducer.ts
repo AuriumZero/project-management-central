@@ -1,16 +1,20 @@
 import { fromDay, toDay } from '../lib/dates'
-import { childrenOf, schedule, shiftTree } from '../lib/plan'
+import { addWorkdays, snapWorkday } from '../lib/calendar'
+import type { WorkWeek } from '../lib/calendar'
+import { childrenOf, placeAt, schedule, shiftTree } from '../lib/plan'
 import type { AppState, Dependency, Project, Status, Task, Ticket, View, Zoom } from '../lib/types'
 
 export type Action =
   | { type: 'selectProject'; id: string }
   | { type: 'setView'; view: View }
   | { type: 'setZoom'; zoom: Zoom }
-  | { type: 'createProject'; project: Pick<Project, 'id' | 'name' | 'key' | 'description'> }
+  | { type: 'createProject'; project: Pick<Project, 'id' | 'name' | 'key' | 'description'> & Partial<Pick<Project, 'workWeek'>> }
   | { type: 'updateProject'; patch: Pick<Project, 'name' | 'key' | 'description'> }
   | { type: 'deleteProject' }
   | { type: 'saveTask'; task: Task; successors?: Dependency[] }
-  | { type: 'updateTask'; id: string; patch: Partial<Omit<Task, 'id'>> }
+  /** Inline edits. A new start keeps the task's length; `days` sets the length in working days. */
+  | { type: 'updateTask'; id: string; patch: Partial<Omit<Task, 'id'>> & { days?: number } }
+  | { type: 'setWorkWeek'; workWeek: WorkWeek }
   | { type: 'moveTask'; id: string; by: -1 | 1 }
   | { type: 'indentTask'; id: string }
   | { type: 'outdentTask'; id: string }
@@ -36,10 +40,10 @@ function withCurrent(state: AppState, fn: (p: Project) => Project): AppState {
 }
 
 /** Applies a change to the current project's tasks, then re-schedules the plan. */
-function withTasks(state: AppState, fn: (tasks: Task[], p: Project) => Task[]): AppState {
+function withTasks(state: AppState, fn: (tasks: Task[], week: WorkWeek) => Task[]): AppState {
   return withCurrent(state, (p) => {
-    const tasks = fn(p.tasks, p)
-    return tasks === p.tasks ? p : { ...p, tasks: schedule(tasks) }
+    const tasks = fn(p.tasks, p.workWeek)
+    return tasks === p.tasks ? p : { ...p, tasks: schedule(tasks, p.workWeek) }
   })
 }
 
@@ -75,7 +79,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         current: action.project.id,
-        projects: [...state.projects, { ...action.project, tasks: [], tickets: [], seq: 0, view: 'gantt', zoom: 'day' }],
+        projects: [...state.projects, { workWeek: 'weekdays', ...action.project, tasks: [], tickets: [], seq: 0, view: 'gantt', zoom: 'day' }],
       }
 
     case 'updateProject':
@@ -88,7 +92,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'saveTask':
-      return withTasks(state, (tasks) => {
+      return withTasks(state, (tasks, week) => {
         const task: Task = { ...action.task, end: action.task.milestone ? action.task.start : action.task.end }
         const old = tasks.find((t) => t.id === task.id)
         if (action.successors) tasks = setSuccessors(tasks, task.id, action.successors)
@@ -96,26 +100,33 @@ export function reducer(state: AppState, action: Action): AppState {
         if (!old) return [...tasks.map((t) => (t.id === task.parentId && t.collapsed ? { ...t, collapsed: false } : t)), task]
         // A parent's dates come from its subtasks: moving its start moves the whole group.
         if (isParent(tasks, task.id)) {
-          const moved = shiftTree(tasks, task.id, toDay(task.start) - toDay(old.start))
+          const moved = shiftTree(tasks, task.id, toDay(task.start) - toDay(old.start), week)
           return moved.map((t) => (t.id === task.id ? { ...task, start: t.start, end: t.end, progress: t.progress } : t))
         }
         return tasks.map((t) => (t.id === task.id ? task : t))
       })
 
     case 'updateTask':
-      return withTasks(state, (tasks) => {
+      return withTasks(state, (tasks, week) => {
         const old = tasks.find((t) => t.id === action.id)
         if (!old) return tasks
-        const { start, end, progress, ...rest } = action.patch
+        const { start, end, days, ...rest } = action.patch
         if (isParent(tasks, old.id)) {
-          const moved = start ? shiftTree(tasks, old.id, toDay(start) - toDay(old.start)) : tasks
+          const moved = start ? shiftTree(tasks, old.id, toDay(start) - toDay(old.start), week) : tasks
           return moved.map((t) => (t.id === old.id ? { ...t, ...rest } : t))
         }
-        const next: Task = { ...old, ...rest, start: start ?? old.start, end: end ?? old.end, progress: progress ?? old.progress }
-        if (next.milestone) next.end = next.start
-        if (toDay(next.end) < toDay(next.start)) next.end = next.start
+        let next: Task = { ...old, ...rest }
+        // A new start keeps the length, as in Microsoft Project.
+        if (start) next = placeAt(next, toDay(start), week)
+        if (end) next = { ...next, end: fromDay(Math.max(toDay(next.start), snapWorkday(toDay(end), -1, week))) }
+        if (days) next = { ...next, end: fromDay(addWorkdays(toDay(next.start), Math.max(1, days) - 1, week)) }
+        if (next.milestone) next = { ...next, end: next.start }
         return tasks.map((t) => (t.id === old.id ? next : t))
       })
+
+    case 'setWorkWeek':
+      return withCurrent(state, (p) =>
+        p.workWeek === action.workWeek ? p : { ...p, workWeek: action.workWeek, tasks: schedule(p.tasks, action.workWeek) })
 
     case 'moveTask':
       return withTasks(state, (tasks) => {
@@ -165,15 +176,19 @@ export function reducer(state: AppState, action: Action): AppState {
           : t))
 
     case 'shiftTask':
-      return withTasks(state, (tasks) => {
+      return withTasks(state, (tasks, week) => {
         const task = tasks.find((t) => t.id === action.id)
         if (!task) return tasks
-        if (isParent(tasks, task.id)) return shiftTree(tasks, task.id, action.start)
+        if (isParent(tasks, task.id) || action.start === action.end) return shiftTree(tasks, task.id, action.start, week)
+        // Resizing one end: snap it onto a working day in the direction it was dragged.
         return tasks.map((t) => {
           if (t.id !== action.id) return t
-          const start = toDay(t.start) + action.start
-          const end = t.milestone ? start : Math.max(start, toDay(t.end) + action.end)
-          return { ...t, start: fromDay(start), end: fromDay(end) }
+          const start = action.start ? snapWorkday(toDay(t.start) + action.start, action.start, week) : toDay(t.start)
+          const end = action.end ? snapWorkday(toDay(t.end) + action.end, action.end, week) : toDay(t.end)
+          // Never let a resize make the task end before it starts.
+          return action.start
+            ? { ...t, start: fromDay(Math.min(start, end)) }
+            : { ...t, end: fromDay(Math.max(start, end)) }
         })
       })
 
@@ -182,7 +197,7 @@ export function reducer(state: AppState, action: Action): AppState {
         const gone = new Set([action.id, ...childrenOf(p.tasks, action.id).map((t) => t.id)])
         return {
           ...p,
-          tasks: schedule(p.tasks.filter((t) => !gone.has(t.id)).map((t) => ({ ...t, deps: t.deps.filter((d) => !gone.has(d.id)) }))),
+          tasks: schedule(p.tasks.filter((t) => !gone.has(t.id)).map((t) => ({ ...t, deps: t.deps.filter((d) => !gone.has(d.id)) })), p.workWeek),
           tickets: p.tickets.map((t) => (gone.has(t.taskId) ? { ...t, taskId: '' } : t)),
         }
       })

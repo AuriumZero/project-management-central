@@ -13,9 +13,10 @@ A personal project planner with a Gantt chart and a ticket board, built with Rea
 
 - **A plan that works like Microsoft Project.** The plan is an editable table next to the Gantt chart. You type names, start and finish dates, durations, predecessors, assignees and % complete straight into the grid. You can drag the divider to give the chart more room.
 - **Three levels of task.** Row 0 is the whole project, rolled up from everything below it. Parent tasks are the big deliverables and milestones. Subtasks sit under a parent and have an assignee. A parent's dates and progress come from its subtasks, and you can fold a parent to hide them.
-- **Dependencies with link types.** You can use finish-to-start, start-to-start, finish-to-finish and start-to-finish links, with lag or lead in days. Enter them as `3, 5SS+2d` in the Predecessors column, pick them in the task dialog (predecessors and successors), or drag from the dot at the end of one bar onto another.
+- **Dependencies with link types.** You can use finish-to-start, start-to-start, finish-to-finish and start-to-finish links, with lag or lead in working days. Enter them as `3, 5SS+2d` in the Predecessors column, pick them in the task dialog (predecessors and successors), or drag from the dot at the end of one bar onto another.
 - **Auto-scheduling.** When a task moves or grows, its successors are pushed later to keep every link true. Moving a parent moves all of its subtasks. Links that would create a loop are refused.
 - **Row buttons.** Every row has buttons to edit, add a subtask, indent or outdent, and delete (with a confirm click), so you don't have to open the task first.
+- **Working days.** Durations and lag skip Saturdays and Sundays by default, like Microsoft Project's standard calendar. The Working days setting in the toolbar switches a project to counting all seven days.
 - **Drag to reschedule.** Drag a bar to move it, or drag either end to change its length. Undo and redo are available with Ctrl+Z / Ctrl+Shift+Z.
 - **Ticket board.** Four columns (Backlog, To do, In progress, Done) with drag and drop, priorities, types, due dates with an overdue flag, and links to plan tasks.
 - **Backup and restore.** Export everything to a JSON file and import it on another machine. Older backups are upgraded automatically.
@@ -56,5 +57,4 @@ npm run build      # production build in dist/
 
 - Optional cloud sync so the same data shows up on every device
 - Critical path highlighting
-- Working-day calendars (durations currently count calendar days)
 - Keyboard controls for moving and resizing bars

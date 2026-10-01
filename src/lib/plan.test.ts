@@ -165,3 +165,25 @@ describe('predecessor text', () => {
     expect(formatPredecessors(t, numById)).toBe('1, 2SS+2d, 3FS-1d')
   })
 })
+
+describe('schedule on a Monday-to-Friday calendar', () => {
+  // 2026-10-02 is a Friday.
+  it('moves tasks off weekends and keeps lag in working days', () => {
+    const tasks = schedule([
+      task('a', '2026-10-03', '2026-10-03'),
+      task('b', '2026-10-01', '2026-10-01', { deps: [link('a', 'FS', 2)] }),
+    ], 'weekdays')
+    expect(get(tasks, 'a')).toMatchObject({ start: '2026-10-05', end: '2026-10-05' })
+    // Two working days of lag after Monday: Wed and Thu wait, so b starts Thursday.
+    expect(get(tasks, 'b').start).toBe('2026-10-08')
+  })
+
+  it('keeps a group’s working-day shape when it is pushed', () => {
+    const tasks = schedule([
+      task('x', '2026-10-01', '2026-10-02'),
+      task('p', '2026-10-01', '2026-10-01', { deps: [link('x')] }),
+      task('c1', '2026-10-01', '2026-10-02', { parentId: 'p' }),
+    ], 'weekdays')
+    expect(get(tasks, 'c1')).toMatchObject({ start: '2026-10-05', end: '2026-10-06' })
+  })
+})

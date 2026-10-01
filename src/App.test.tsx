@@ -2,6 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
+import { addWorkdays } from './lib/calendar'
+import { fromDay, toDay } from './lib/dates'
 import { loadState, seedState, STORAGE_KEY } from './lib/storage'
 
 const renderApp = () => {
@@ -91,7 +93,8 @@ describe('App', () => {
     await user.clear(preds)
     await user.type(preds, '8FS+2d{Enter}')
     const after = within(screen.getByDisplayValue('Launch').closest('[role=row]') as HTMLElement).getByLabelText('Start of Launch')
-    expect(new Date(after.getAttribute('value')!).getTime() - new Date(before).getTime()).toBe(2 * 86_400_000)
+    // The sample project skips weekends, so the lag is two working days.
+    expect(after.getAttribute('value')).toBe(fromDay(addWorkdays(toDay(before), 2, 'weekdays')))
   })
 
   it('rejects a predecessor that would make a loop', async () => {

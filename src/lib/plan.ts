@@ -1,3 +1,5 @@
+import { addWorkdays, nextWorkday, prevWorkday, snapWorkday, workdayOffset, workdaysBetween } from './calendar'
+import type { WorkWeek } from './calendar'
 import { fromDay, spanDays, toDay } from './dates'
 import type { Dependency, LinkType, Task } from './types'
 
@@ -111,35 +113,77 @@ export function sanitize(input: Task[]): Task[] {
   })
 }
 
-/** Moves a task and, for a parent, all of its subtasks. */
-export function shiftTree(tasks: Task[], id: string, days: number): Task[] {
-  if (!days) return tasks
-  const move = (t: Task): Task => ({ ...t, start: fromDay(toDay(t.start) + days), end: fromDay(toDay(t.end) + days) })
-  return tasks.map((t) => (t.id === id || t.parentId === id ? move(t) : t))
+/** A task's length in working days; milestones have none. */
+export function duration(task: Task, week: WorkWeek): number {
+  return task.milestone ? 0 : Math.max(1, workdaysBetween(toDay(task.start), toDay(task.end), week))
 }
 
-/** How many days the successor must move later to satisfy one link (0 if it already does). */
-export function requiredDelay(pred: Task, succ: Task, dep: Pick<Dependency, 'type' | 'lag'>): number {
-  const ps = toDay(pred.start)
-  const pe = toDay(pred.end)
-  const ss = toDay(succ.start)
-  const se = toDay(succ.end)
-  const need: Record<LinkType, number> = {
-    FS: pe + 1 + dep.lag - ss,
-    SS: ps + dep.lag - ss,
-    FF: pe + dep.lag - se,
-    SF: ps - 1 + dep.lag - se,
-  }
-  return Math.max(0, need[dep.type])
+/** Places a task at `start` (snapped onto the calendar), keeping its working-day length. */
+export function placeAt(task: Task, start: number, week: WorkWeek, direction = 1): Task {
+  const length = duration(task, week)
+  const s = snapWorkday(start, direction, week)
+  const e = task.milestone ? s : addWorkdays(s, length - 1, week)
+  const next = { ...task, start: fromDay(s), end: fromDay(e) }
+  return next.start === task.start && next.end === task.end ? task : next
 }
 
 /**
- * Auto-schedules the plan: successors are pushed later until every link is
- * satisfied, and parents are rolled up from their subtasks. Tasks are never
- * pulled earlier, so slack you add by hand is kept.
+ * Moves a task by `days` calendar days and, for a parent, moves each of its
+ * subtasks by the same number of working days so the group keeps its shape.
  */
-export function schedule(input: Task[]): Task[] {
-  let tasks = rollup(sanitize(input))
+export function shiftTree(tasks: Task[], id: string, days: number, week: WorkWeek = 'all'): Task[] {
+  if (!days) return tasks
+  const root = tasks.find((t) => t.id === id)
+  if (!root) return tasks
+  const from = nextWorkday(toDay(root.start), week)
+  const to = snapWorkday(from + days, days, week)
+  const offset = workdayOffset(from, to, week)
+  return tasks.map((t) => {
+    if (t.id !== id && t.parentId !== id) return t
+    if (t.id === id && tasks.some((c) => c.parentId === id)) return t // rolled up afterwards
+    return placeAt(t, addWorkdays(toDay(t.start), offset, week), week, offset)
+  })
+}
+
+/** Snaps every task onto working days, keeping its working-day length. */
+function normalize(tasks: Task[], week: WorkWeek): Task[] {
+  if (week === 'all') return tasks
+  return tasks.map((t) => {
+    const s = nextWorkday(toDay(t.start), week)
+    const e = t.milestone ? s : Math.max(s, prevWorkday(toDay(t.end), week))
+    return fromDay(s) === t.start && fromDay(e) === t.end ? t : { ...t, start: fromDay(s), end: fromDay(e) }
+  })
+}
+
+/**
+ * The earliest working day the successor may start on to satisfy one link.
+ * Lag counts working days. A milestone counts as finishing on its own day.
+ */
+export function earliestStart(pred: Task, succ: Task, dep: Pick<Dependency, 'type' | 'lag'>, week: WorkWeek = 'all'): number {
+  const ps = toDay(pred.start)
+  const pe = toDay(pred.end)
+  const back = (finish: number) => addWorkdays(finish, -(Math.max(1, duration(succ, week)) - 1), week)
+  switch (dep.type) {
+    case 'FS': return addWorkdays(pe, 1 + dep.lag, week)
+    case 'SS': return addWorkdays(ps, dep.lag, week)
+    case 'FF': return back(addWorkdays(pe, dep.lag, week))
+    case 'SF': return back(addWorkdays(ps, dep.lag - 1, week))
+  }
+}
+
+/** How many calendar days the successor must move later to satisfy one link (0 if it already does). */
+export function requiredDelay(pred: Task, succ: Task, dep: Pick<Dependency, 'type' | 'lag'>, week: WorkWeek = 'all'): number {
+  return Math.max(0, earliestStart(pred, succ, dep, week) - toDay(succ.start))
+}
+
+/**
+ * Auto-schedules the plan: tasks are snapped onto working days, successors
+ * are pushed later until every link is satisfied, and parents are rolled up
+ * from their subtasks. Tasks are never pulled earlier, so slack you add by
+ * hand is kept.
+ */
+export function schedule(input: Task[], week: WorkWeek = 'all'): Task[] {
+  let tasks = rollup(normalize(sanitize(input), week))
   const limit = tasks.length * 4 + 10
   for (let pass = 0; pass < limit; pass++) {
     let changed = false
@@ -148,9 +192,9 @@ export function schedule(input: Task[]): Task[] {
         const pred = tasks.find((x) => x.id === dep.id)
         const succ = tasks.find((x) => x.id === t.id)!
         if (!pred) continue
-        const delay = requiredDelay(pred, succ, dep)
+        const delay = requiredDelay(pred, succ, dep, week)
         if (delay > 0) {
-          tasks = rollup(shiftTree(tasks, t.id, delay))
+          tasks = rollup(shiftTree(tasks, t.id, delay, week))
           changed = true
         }
       }

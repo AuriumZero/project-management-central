@@ -1,7 +1,9 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, InputHTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
 import { formatDay, fromDay, spanDays, toDay, today } from '../lib/dates'
-import { dropsLinks, formatPredecessors, outline, parsePredecessors, projectSummary } from '../lib/plan'
+import { workdaysBetween } from '../lib/calendar'
+import type { WorkWeek } from '../lib/calendar'
+import { dropsLinks, duration, formatPredecessors, outline, parsePredecessors, projectSummary } from '../lib/plan'
 import type { OutlineRow } from '../lib/plan'
 import { dragOffsets, ganttLayout, ROW_HEIGHT } from '../lib/schedule'
 import type { ChartRow, DragMode } from '../lib/schedule'
@@ -243,7 +245,7 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
   const tip = dragged && drag && (() => {
     const s = toDay(dragged.start) + drag.start
     const e = dragged.milestone ? s : toDay(dragged.end) + (hasKids(dragged.id) ? drag.start : drag.end)
-    return dragged.milestone ? formatDay(s) : `${formatDay(s)} – ${formatDay(e)} · ${e - s + 1}d`
+    return dragged.milestone ? formatDay(s) : `${formatDay(s)} – ${formatDay(e)} · ${workdaysBetween(s, e, project.workWeek)}d`
   })()
 
   const gridStyle = {
@@ -298,6 +300,7 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
             )}
             {visible.map((row) => (
               <TaskRow
+                week={project.workWeek}
                 key={row.task.id}
                 row={row}
                 show={col.show}
@@ -320,7 +323,7 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
           </div>
           <div className="g-body" ref={body} style={{ width: layout.width, height: layout.height }}>
             {layout.gridLines.map((x) => <div key={`l${x}`} className="g-line" style={{ left: x }} />)}
-            {layout.weekends.map((w) => <div key={`w${w.x}`} className="g-wkend" style={{ left: w.x, width: w.width }} />)}
+            {project.workWeek === 'weekdays' && layout.weekends.map((w) => <div key={`w${w.x}`} className="g-wkend" style={{ left: w.x, width: w.width }} />)}
             {chartRows.map((r, i) => <div key={`r${r.id}`} className="g-rowline" style={{ top: (i + 1) * ROW_HEIGHT - 1 }} />)}
             {layout.todayX != null && <div className="g-today" style={{ left: layout.todayX - 1 }} />}
             <svg className="g-svg" width={layout.width} height={layout.height} aria-hidden="true">
@@ -401,6 +404,7 @@ function Cell({ value, onCommit, label, className = '', ...rest }: {
 }
 
 interface TaskRowProps {
+  week: WorkWeek
   row: OutlineRow
   show: boolean
   narrow: boolean
@@ -414,7 +418,7 @@ interface TaskRowProps {
   onAddSubtask: () => void
 }
 
-function TaskRow({ row, show, narrow, canIndent, numById, idByNum, tasks, dispatch, toast, onEdit, onAddSubtask }: TaskRowProps) {
+function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, dispatch, toast, onEdit, onAddSubtask }: TaskRowProps) {
   const { task, depth, hasChildren, num } = row
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -423,15 +427,15 @@ function TaskRow({ row, show, narrow, canIndent, numById, idByNum, tasks, dispat
     return () => clearTimeout(id)
   }, [armed])
 
-  const update = (patch: Partial<Task>) => dispatch({ type: 'updateTask', id: task.id, patch })
+  const update = (patch: Partial<Task> & { days?: number }) => dispatch({ type: 'updateTask', id: task.id, patch })
   const name = task.name || 'Untitled'
-  const days = task.milestone ? 0 : spanDays(task.start, task.end)
+  const days = duration(task, week)
   const kids = tasks.filter((t) => t.parentId === task.id).length
 
   const commitStart = (v: string) => {
     if (!v) return
     // Moving the start keeps the length, as in Microsoft Project.
-    update({ start: v, end: fromDay(toDay(v) + (task.milestone ? 0 : days - 1)) })
+    update({ start: v })
   }
   const commitFinish = (v: string) => {
     if (!v) return
@@ -441,7 +445,7 @@ function TaskRow({ row, show, narrow, canIndent, numById, idByNum, tasks, dispat
   const commitDays = (v: string) => {
     const n = Math.round(Number(v))
     if (!Number.isFinite(n) || n < 1) return toast('Days must be 1 or more.')
-    update({ end: fromDay(toDay(task.start) + n - 1) })
+    update({ days: n })
   }
   const commitPreds = (v: string) => {
     const deps = parsePredecessors(v, idByNum, task.id)
@@ -536,7 +540,7 @@ function ProjectRow({ project, summary, show, dispatch }: {
       {show && <>
         <span className="c-start mono ro" role="gridcell">{formatDay(summary.start, { month: 'short', day: 'numeric', year: '2-digit' })}</span>
         <span className="c-finish mono ro" role="gridcell">{formatDay(summary.end, { month: 'short', day: 'numeric', year: '2-digit' })}</span>
-        <span className="c-days mono ro" role="gridcell">{summary.end - summary.start + 1}</span>
+        <span className="c-days mono ro" role="gridcell">{workdaysBetween(summary.start, summary.end, project.workWeek)}</span>
         <span className="c-preds" role="gridcell" />
         <span className="c-assignee ro muted" role="gridcell">Whole project</span>
         <span className="c-pct mono ro" role="gridcell">{summary.progress}</span>

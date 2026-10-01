@@ -4,6 +4,7 @@ import { GanttChart } from './components/GanttChart'
 import type { GanttHandle } from './components/GanttChart'
 import { TicketBoard } from './components/TicketBoard'
 import type { TicketFilters } from './components/TicketBoard'
+import type { WorkWeek } from './lib/calendar'
 import { formatDay } from './lib/dates'
 import { projectStats } from './lib/schedule'
 import { loadState, parseBackup, saveState, seedState } from './lib/storage'
@@ -163,6 +164,16 @@ export default function App({ initialState }: { initialState?: AppState }) {
                         <button key={z} aria-pressed={project.zoom === z} onClick={() => dispatch({ type: 'setZoom', zoom: z })}>{capitalize(z)}</button>
                       ))}
                     </div>
+                    <select
+                      className="input"
+                      aria-label="Working days"
+                      title="Which days count toward task durations"
+                      value={project.workWeek}
+                      onChange={(e) => dispatch({ type: 'setWorkWeek', workWeek: e.target.value as WorkWeek })}
+                    >
+                      <option value="weekdays">Mon–Fri</option>
+                      <option value="all">7 days a week</option>
+                    </select>
                     <div className="seg" role="group" aria-label="History">
                       <button disabled={!history.past.length} onClick={() => dispatch({ type: 'undo' })} title="Undo (Ctrl+Z)">Undo</button>
                       <button disabled={!history.future.length} onClick={() => dispatch({ type: 'redo' })} title="Redo (Ctrl+Shift+Z)">Redo</button>

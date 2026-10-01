@@ -31,7 +31,7 @@ export function seedState(todayDay = today()): AppState {
     t('content', 'Content migration', 12, 22, 10, { parentId: id.build, assignee: 'Jordan', deps: [{ id: id.frontend, type: 'SS', lag: 2 }] }),
     t('qa', 'QA & fixes', 25, 30, 0, { parentId: id.build, assignee: 'Sam', deps: [fs('frontend'), fs('content')] }),
     t('launch', 'Launch', 31, 31, 0, { milestone: true, deps: [fs('build')] }),
-  ])
+  ], 'weekdays')
   const ticket = (num: number, title: string, status: Ticket['status'], priority: Ticket['priority'], type: Ticket['type'], taskId: string, due?: number, description = ''): Ticket =>
     ({ id: makeId(), num, title, status, priority, type, taskId, due: due == null ? '' : D(due), description, created: D(-14) })
   const tickets: Ticket[] = [
@@ -49,7 +49,7 @@ export function seedState(todayDay = today()): AppState {
     projects: [{
       id: 'p1', name: 'Website relaunch (example)', key: 'WEB',
       description: 'Sample project to show how plans, the Gantt chart and tickets fit together. Edit it or delete it.',
-      tasks, tickets, seq: 7, view: 'gantt', zoom: 'day',
+      tasks, tickets, seq: 7, view: 'gantt', zoom: 'day', workWeek: 'weekdays',
     }],
   }
 }
@@ -103,6 +103,8 @@ export function parseBackup(text: string): AppState | string {
   if (!isObj(data) || !Array.isArray(data.projects)) return 'That file is not a Project Management Central backup.'
 
   const projects: Project[] = data.projects.filter(isObj).map((p) => {
+    // Projects saved before the setting existed get the Microsoft Project default.
+    const workWeek = p.workWeek === 'all' ? 'all' : 'weekdays'
     const tasks: Task[] = (Array.isArray(p.tasks) ? p.tasks : []).filter(isObj)
       .filter((t) => isValidDate(t.start) && isValidDate(t.end))
       .map((t) => ({
@@ -137,11 +139,12 @@ export function parseBackup(text: string): AppState | string {
       key: str(p.key, 'PRJ'),
       description: str(p.description),
       // Repairs the outline, drops links that can't be scheduled and rolls up parents.
-      tasks: schedule(tasks),
+      tasks: schedule(tasks, workWeek),
       tickets,
       seq: Math.max(Number(p.seq) || 0, ...tickets.map((t) => t.num), 0),
       view: p.view === 'board' ? 'board' : 'gantt',
       zoom: oneOf(ZOOMS, p.zoom, 'day'),
+      workWeek,
     }
   })
   const current = projects.some((p) => p.id === data.current) ? (data.current as string) : projects[0]?.id

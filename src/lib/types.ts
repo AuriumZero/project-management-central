@@ -1,3 +1,5 @@
+import type { WorkWeek } from './calendar'
+
 /** A calendar date stored as `YYYY-MM-DD`. */
 export type ISODate = string
 
@@ -73,6 +75,8 @@ export interface Project {
   seq: number
   view: View
   zoom: Zoom
+  /** Whether durations skip weekends (the default) or count every day. */
+  workWeek: WorkWeek
 }
 
 export interface AppState {
