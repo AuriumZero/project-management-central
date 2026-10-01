@@ -9,17 +9,18 @@ import { dragOffsets, ganttLayout, ROW_HEIGHT } from '../lib/schedule'
 import type { ChartRow, DragMode } from '../lib/schedule'
 import type { Project, Task } from '../lib/types'
 import type { Action } from '../state/reducer'
-import { AssigneeList } from './Dialogs'
+import { AssigneeList, newTask } from './Dialogs'
 
 export interface GanttHandle {
   scrollToToday: () => void
+  /** Adds a row to the plan (a subtask when `parentId` is given) and puts the cursor in its name. */
+  addTask: (parentId?: string) => void
 }
 
 interface GanttChartProps {
   project: Project
   dispatch: Dispatch<Action>
   onEditTask: (task: Task) => void
-  onNewTask: (parentId?: string) => void
   toast: (message: string) => void
   /** Show the Start, Finish, Days, Predecessors, Assignee and % columns. */
   details: boolean
@@ -84,7 +85,7 @@ function savedGridWidth(): number | null {
   }
 }
 
-export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, details, ref }: GanttChartProps) {
+export function GanttChart({ project, dispatch, onEditTask, toast, details, ref }: GanttChartProps) {
   const { tasks, zoom } = project
   const todayDay = today()
   const narrow = useNarrow()
@@ -152,7 +153,23 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
     if (!el || layout.todayX == null) return
     el.scrollTo({ left: Math.max(0, layout.todayX - (el.clientWidth - left) / 4), behavior })
   }
-  useImperativeHandle(ref, () => ({ scrollToToday }))
+  // New tasks go straight into the grid, like typing into a blank row in Microsoft Project.
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const addTask = (parentId = '') => {
+    const task = { ...newTask(project, parentId), name: parentId ? 'New subtask' : 'New task' }
+    dispatch({ type: 'saveTask', task })
+    setFocusId(task.id)
+  }
+  useEffect(() => {
+    if (!focusId) return
+    const input = scroller.current?.querySelector<HTMLInputElement>(`[data-id="${focusId}"] input.name`)
+    if (!input) return
+    input.focus()
+    input.select()
+    setFocusId(null)
+  }, [focusId, tasks])
+
+  useImperativeHandle(ref, () => ({ scrollToToday, addTask }))
 
   // Start each project and zoom level with today in view.
   useLayoutEffect(() => { scrollToToday('instant') }, [project.id, zoom])
@@ -162,7 +179,7 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
       <div className="blank">
         <h2>No tasks in this plan</h2>
         <p>Add parent tasks for the big deliverables, then break each one into subtasks with an owner. The Gantt chart builds itself as you go.</p>
-        <button className="btn primary" onClick={() => onNewTask()}>Add the first task</button>
+        <button className="btn primary" onClick={() => addTask()}>Add the first task</button>
       </div>
     )
   }
@@ -312,11 +329,11 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
                 dispatch={dispatch}
                 toast={toast}
                 onEdit={() => onEditTask(row.task)}
-                onAddSubtask={() => onNewTask(row.task.id)}
+                onAddSubtask={() => addTask(row.task.id)}
               />
             ))}
             <div className="g-add">
-              <button className="btn ghost small" onClick={() => onNewTask()}>+ Add task</button>
+              <button className="btn ghost small" onClick={() => addTask()}>+ Add task</button>
             </div>
            </div>
            {splitter}
@@ -380,7 +397,7 @@ export function GanttChart({ project, dispatch, onEditTask, onNewTask, toast, de
 }
 
 /** A text input that saves when you leave it or press Enter, and reverts on Escape. */
-function Cell({ value, onCommit, label, className = '', ...rest }: {
+function Cell({ value, onCommit, label, className = '', onKeyDown: extraKeyDown, ...rest }: {
   value: string
   onCommit: (value: string) => void
   label: string
@@ -389,6 +406,7 @@ function Cell({ value, onCommit, label, className = '', ...rest }: {
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') e.currentTarget.blur()
     if (e.key === 'Escape') { e.currentTarget.value = value; e.currentTarget.blur() }
+    extraKeyDown?.(e)
   }
   return (
     <input
@@ -432,6 +450,15 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
   const days = duration(task, week)
   const kids = tasks.filter((t) => t.parentId === task.id).length
 
+  // Tab from the name goes straight to Start, past the row buttons, so a row can be typed in one pass.
+  const tabToStart = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Tab' || e.shiftKey || !show) return
+    const next = e.currentTarget.closest('[role=row]')?.querySelector<HTMLInputElement>('.c-start input')
+    if (!next) return
+    e.preventDefault()
+    next.focus()
+  }
+
   const commitStart = (v: string) => {
     if (!v) return
     // Moving the start keeps the length, as in Microsoft Project.
@@ -461,7 +488,7 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
   }
 
   return (
-    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}`} role="row" data-row={num}>
+    <div className={`g-name grid-row${depth ? ' sub' : ''}${hasChildren ? ' parent' : ''}`} role="row" data-row={num} data-id={task.id}>
       <span className="c-id mono" role="gridcell">{num}</span>
       <span className="c-name" role="gridcell" style={{ paddingLeft: depth * 18 }}>
         {hasChildren ? (
@@ -472,7 +499,7 @@ function TaskRow({ week, row, show, narrow, canIndent, numById, idByNum, tasks, 
             onClick={() => dispatch({ type: 'toggleCollapse', id: task.id })}
           >{task.collapsed ? '▸' : '▾'}</button>
         ) : <span className="twisty-gap">{task.milestone ? '◆' : ''}</span>}
-        <Cell value={task.name} label={`Name of row ${num}`} className="name" onCommit={(v) => v.trim() ? update({ name: v.trim() }) : toast('A task needs a name.')} />
+        <Cell value={task.name} label={`Name of row ${num}`} className="name" onKeyDown={tabToStart} onCommit={(v) => v.trim() ? update({ name: v.trim() }) : toast('A task needs a name.')} />
       </span>
       <span className="c-actions" role="gridcell">
         {armed ? (

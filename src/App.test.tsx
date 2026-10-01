@@ -22,23 +22,40 @@ describe('App', () => {
     expect(screen.getByText('Open tickets').previousElementSibling).toHaveTextContent('6')
   })
 
-  it('adds a task and saves it to the browser', async () => {
+  it('adds a task as a new row with its name ready to type over', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: '+ Task' }))
-    await user.type(screen.getByLabelText('Task name'), 'Write launch email')
-    await user.click(screen.getByRole('button', { name: 'Add task' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const name = screen.getByDisplayValue('New task')
+    expect(name).toHaveFocus()
+    await user.keyboard('Write launch email{Enter}')
     expect(screen.getByDisplayValue('Write launch email')).toBeInTheDocument()
     expect(localStorage.getItem(STORAGE_KEY)).toContain('Write launch email')
   })
 
-  it('refuses a task that ends before it starts', async () => {
+  it('fills in a new row column by column', async () => {
     const user = renderApp()
-    await user.click(screen.getByRole('button', { name: '+ Task' }))
-    await user.type(screen.getByLabelText('Task name'), 'Backwards')
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    await user.click(screen.getByRole('button', { name: '+ Add task' }))
+    await user.keyboard('Press kit')
+    await user.tab()
+    expect(screen.getByLabelText('Start of Press kit')).toHaveFocus()
+    const row = screen.getByDisplayValue('Press kit').closest<HTMLElement>('[role=row]')!
+    const days = within(row).getByLabelText('Days for Press kit')
+    await user.clear(days)
+    await user.type(days, '3{Enter}')
+    await user.type(within(row).getByLabelText('Assignee of Press kit'), 'Robin{Enter}')
+    const saved = loadState()!.projects[0].tasks.find((t) => t.name === 'Press kit')!
+    expect(saved.assignee).toBe('Robin')
+    expect(toDay(saved.end)).toBe(addWorkdays(toDay(saved.start), 2, 'weekdays'))
+  })
+
+  it('refuses an edit that ends before it starts', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))
     fireEvent.change(screen.getByLabelText('Start'), { target: { value: '2026-10-10' } })
     fireEvent.change(screen.getByLabelText('Finish'), { target: { value: '2026-10-01' } })
-    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(screen.getByRole('alert')).toHaveTextContent('The end date is before the start date')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
@@ -62,16 +79,14 @@ describe('App', () => {
     expect(screen.getByDisplayValue('Wireframes')).toBeInTheDocument()
   })
 
-  it('adds a subtask with an assignee from the parent row', async () => {
+  it('adds a subtask row under its parent', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Add subtask to Design' }))
-    expect(screen.getByRole('heading', { name: /New subtask/ })).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Task name'), 'Accessibility audit')
-    await user.type(screen.getByLabelText('Assignee'), 'Robin')
-    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    expect(screen.getByDisplayValue('New subtask')).toHaveFocus()
+    await user.keyboard('Accessibility audit{Enter}')
     const saved = loadState()!.projects[0].tasks
     const design = saved.find((t) => t.name === 'Design')!
-    expect(saved.find((t) => t.name === 'Accessibility audit')).toMatchObject({ parentId: design.id, assignee: 'Robin' })
+    expect(saved.find((t) => t.name === 'Accessibility audit')).toMatchObject({ parentId: design.id })
   })
 
   it('folds a parent to hide its subtasks', async () => {

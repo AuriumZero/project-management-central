@@ -15,7 +15,7 @@ import { currentProject } from './state/reducer'
 
 type Dialog =
   | { kind: 'project'; isNew: boolean }
-  | { kind: 'task'; task?: Task; parentId?: string }
+  | { kind: 'task'; task?: Task }
   | { kind: 'ticket'; ticket?: Ticket; status?: Status }
   | { kind: 'backup' }
   | { kind: 'restore'; data: AppState }
@@ -85,6 +85,17 @@ export default function App({ initialState }: { initialState?: AppState }) {
     const parsed = parseBackup(await file.text())
     if (typeof parsed === 'string') toast(parsed)
     else setDialog({ kind: 'restore', data: parsed })
+  }
+
+  const exportExcel = async () => {
+    if (!project) return
+    try {
+      // Loaded on first use so the spreadsheet code isn't part of the first page load.
+      const { downloadPlan } = await import('./lib/excel')
+      downloadPlan(project)
+    } catch {
+      toast("The Excel file couldn't be created. Try again.")
+    }
   }
 
   const dialogProps = { dispatch, onClose: closeDialog, toast }
@@ -182,7 +193,8 @@ export default function App({ initialState }: { initialState?: AppState }) {
                       {details ? 'Hide columns' : 'Show columns'}
                     </button>
                     <button className="btn" onClick={() => gantt.current?.scrollToToday()}>Today</button>
-                    <button className="btn primary" onClick={() => setDialog({ kind: 'task' })}>+ Task</button>
+                    <button className="btn" onClick={() => void exportExcel()} disabled={!project.tasks.length} title="Download the task table and Gantt chart as an Excel file">Export to Excel</button>
+                    <button className="btn primary" onClick={() => gantt.current?.addTask()}>+ Task</button>
                   </>
                 )}
               </div>
@@ -201,7 +213,6 @@ export default function App({ initialState }: { initialState?: AppState }) {
                 project={project}
                 dispatch={dispatch}
                 onEditTask={(task) => setDialog({ kind: 'task', task })}
-                onNewTask={(parentId) => setDialog({ kind: 'task', parentId })}
                 toast={toast}
                 details={details}
               />
@@ -211,7 +222,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
       </main>
 
       {dialog?.kind === 'project' && <ProjectDialog {...dialogProps} project={dialog.isNew ? undefined : project} />}
-      {dialog?.kind === 'task' && project && <TaskDialog {...dialogProps} project={project} task={dialog.task} parentId={dialog.parentId} />}
+      {dialog?.kind === 'task' && project && <TaskDialog {...dialogProps} project={project} task={dialog.task} />}
       {dialog?.kind === 'ticket' && project && <TicketDialog {...dialogProps} project={project} ticket={dialog.ticket} status={dialog.status} />}
       {dialog?.kind === 'backup' && <BackupDialog state={state} onClose={closeDialog} toast={toast} />}
       {dialog?.kind === 'restore' && <RestoreDialog {...dialogProps} data={dialog.data} />}
