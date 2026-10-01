@@ -206,14 +206,26 @@ export function schedule(input: Task[], week: WorkWeek = 'all'): Task[] {
 
 const LINK_RE = /^(\d+)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+)\s*(?:d|days?)?)?$/i
 
+/** One link in Microsoft Project's notation: `3`, `5SS`, `7FF-1d`. */
+export function formatLink(num: number, link: Pick<Dependency, 'type' | 'lag'>): string {
+  const lag = link.lag ? `${link.lag > 0 ? '+' : ''}${link.lag}d` : ''
+  return `${num}${link.type === 'FS' && !lag ? '' : link.type}${lag}`
+}
+
 /** Formats predecessors the way Microsoft Project does: `3, 5SS+2d`. */
 export function formatPredecessors(task: Task, numById: Map<string, number>): string {
   return task.deps
     .filter((d) => numById.has(d.id))
-    .map((d) => {
-      const lag = d.lag ? `${d.lag > 0 ? '+' : ''}${d.lag}d` : ''
-      return `${numById.get(d.id)}${d.type === 'FS' && !lag ? '' : d.type}${lag}`
-    })
+    .map((d) => formatLink(numById.get(d.id)!, d))
+    .join(', ')
+}
+
+/** The tasks waiting on `task`, in the same notation: `4, 6SS+1d`. */
+export function formatSuccessors(task: Task, tasks: Task[], numById: Map<string, number>): string {
+  return tasks
+    .flatMap((t) => t.deps.filter((d) => d.id === task.id && numById.has(t.id)).map((d) => ({ num: numById.get(t.id)!, d })))
+    .sort((x, y) => x.num - y.num)
+    .map(({ num, d }) => formatLink(num, d))
     .join(', ')
 }
 
