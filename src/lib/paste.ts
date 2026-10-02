@@ -6,15 +6,19 @@ import type { ISODate } from './types'
 
 /** Splits pasted text into rows of cells, or null for a single value (an ordinary paste). */
 export function parseClipboard(text: string): string[][] | null {
-  const rows = readTsv(text.replace(/\r\n?/g, '\n'))
+  const rows = readDelimited(text, '\t')
   // Excel ends a copied range with a new line.
   while (rows.length && rows.at(-1)!.every((c) => !c.trim())) rows.pop()
   if (rows.length <= 1 && (rows[0]?.length ?? 0) <= 1) return null
   return rows
 }
 
-/** Tab-separated values, where Excel quotes a cell that holds a line break, a tab or a quote. */
-function readTsv(text: string): string[][] {
+/**
+ * Tab- or comma-separated values, where Excel quotes a cell that holds a line
+ * break, the separator or a quote.
+ */
+export function readDelimited(input: string, sep: '\t' | ','): string[][] {
+  const text = input.replace(/\r\n?/g, '\n')
   const rows: string[][] = [[]]
   let cell = ''
   let quoted = false
@@ -25,7 +29,7 @@ function readTsv(text: string): string[][] {
       else if (ch === '"') quoted = false
       else cell += ch
     } else if (ch === '"' && cell === '') quoted = true
-    else if (ch === '\t') { rows.at(-1)!.push(cell); cell = '' }
+    else if (ch === sep) { rows.at(-1)!.push(cell); cell = '' }
     else if (ch === '\n') { rows.at(-1)!.push(cell); cell = ''; rows.push([]) }
     else cell += ch
   }

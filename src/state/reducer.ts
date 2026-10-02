@@ -37,6 +37,8 @@ export type Action =
   | { type: 'setTicketStatus'; id: string; status: Status }
   | { type: 'deleteTicket'; id: string }
   | { type: 'replaceAll'; state: AppState }
+  /** Adds tasks and risks read from a spreadsheet to the end of the current project. */
+  | { type: 'importItems'; tasks: Task[]; risks: Risk[] }
   /** Several changes as one step, so a paste is undone in one go. */
   | { type: 'batch'; actions: Action[] }
 
@@ -303,6 +305,13 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'replaceAll':
       return action.state
+
+    case 'importItems':
+      return withCurrent(state, (p) => ({
+        ...p,
+        tasks: action.tasks.length ? schedule([...p.tasks, ...action.tasks], p.workWeek) : p.tasks,
+        risks: [...p.risks, ...action.risks],
+      }))
 
     case 'batch':
       return action.actions.reduce(reducer, state)

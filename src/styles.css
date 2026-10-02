@@ -291,3 +291,14 @@ fieldset.links { display: flex; flex-direction: column; gap: 6px }
 .row-dragging { opacity: .45 }
 .drop-line { position: absolute; right: 0; height: 2px; background: var(--accent); z-index: 8; pointer-events: none; box-shadow: 0 0 0 1px var(--surface) }
 .drop-line::before { content: ""; position: absolute; left: -1px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent) }
+
+/* Import from Excel */
+.blank-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center }
+.import { display: flex; flex-direction: column; gap: 10px }
+.import p { margin: 0 }
+.import .note.error p { margin: 0 0 4px }
+.choices { border: 0; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 8px }
+.choices legend { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0; margin-bottom: 6px }
+.choice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.choice input[type=radio] { margin: 0; accent-color: var(--accent) }
+.choice .input { flex: 1; min-width: 180px }
