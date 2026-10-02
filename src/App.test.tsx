@@ -283,6 +283,41 @@ describe('App', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Restored plan' })).toBeInTheDocument()
   })
 
+  it('imports tasks and risks from an Excel file into a new project, as one undo step', async () => {
+    const user = renderApp()
+    const csv = 'Task,Start,Days,Owner\nBook venue,10/5/2026,3,Ana\nSend invites,10/8/2026,2,Ben\n'
+    await user.upload(screen.getByTestId('import-input'), new File([csv], 'Party plan.csv', { type: 'text/csv' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import from Excel' })
+    expect(dialog).toHaveTextContent('Found 2 tasks on the “Party plan” sheet')
+    expect(within(dialog).getByText(/Task columns used: Task, Start, Days, Owner/)).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('New project name')).toHaveValue('Party plan')
+    await user.click(within(dialog).getByRole('button', { name: 'Import' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Party plan' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Imported 2 tasks')
+    expect(screen.getByDisplayValue('Send invites')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.queryByRole('heading', { level: 1, name: 'Party plan' })).not.toBeInTheDocument()
+  })
+
+  it('adds imported risks to the open project', async () => {
+    const user = renderApp()
+    const csv = 'Risk,Impact,Likelihood\nVenue cancels,High,20%\n'
+    await user.upload(screen.getByTestId('import-input'), new File([csv], 'risks.csv', { type: 'text/csv' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import from Excel' })
+    await user.click(within(dialog).getByRole('radio', { name: /The end of/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Import' }))
+    expect(screen.getByRole('tab', { name: 'Risks & issues' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByDisplayValue('Venue cancels')).toBeInTheDocument()
+  })
+
+  it('explains the headings it needs when a file has none it knows', async () => {
+    const user = renderApp()
+    await user.upload(screen.getByTestId('import-input'), new File(['Foo,Bar\n1,2\n'], 'odd.csv', { type: 'text/csv' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import from Excel' })
+    expect(dialog).toHaveTextContent('Nothing to import was found in odd.csv')
+    expect(within(dialog).queryByRole('button', { name: 'Import' })).not.toBeInTheDocument()
+  })
+
   it('rejects a file that is not a backup', async () => {
     const user = renderApp()
     await user.upload(screen.getByTestId('restore-input'), new File(['hello'], 'notes.json', { type: 'application/json' }))

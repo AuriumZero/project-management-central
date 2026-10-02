@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { BackupDialog, ProjectDialog, RestoreDialog, TaskDialog, TicketDialog } from './components/Dialogs'
+import { BackupDialog, ImportDialog, ProjectDialog, RestoreDialog, TaskDialog, TicketDialog } from './components/Dialogs'
 import { GanttChart } from './components/GanttChart'
 import type { GanttHandle } from './components/GanttChart'
 import { RiskLog } from './components/RiskLog'
@@ -12,6 +12,7 @@ import { projectStats } from './lib/schedule'
 import { loadState, parseBackup, saveState, seedState } from './lib/storage'
 import { TICKET_TYPES, ZOOMS } from './lib/types'
 import type { AppState, Status, Task, Ticket, TicketType } from './lib/types'
+import type { SheetData } from './lib/xlsxRead'
 import { historyReducer, initHistory } from './state/history'
 import { currentProject } from './state/reducer'
 
@@ -21,6 +22,7 @@ type Dialog =
   | { kind: 'ticket'; ticket?: Ticket; status?: Status }
   | { kind: 'backup' }
   | { kind: 'restore'; data: AppState }
+  | { kind: 'import'; fileName: string; sheets: SheetData[] }
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1)
 
@@ -43,6 +45,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
   const gantt = useRef<GanttHandle>(null)
   const risks = useRef<RiskLogHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const importInput = useRef<HTMLInputElement>(null)
   const warnedStorage = useRef(false)
   const project = currentProject(state)
 
@@ -101,6 +104,27 @@ export default function App({ initialState }: { initialState?: AppState }) {
     }
   }
 
+  const onImportFile = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      // Loaded on first use, like the export.
+      const { readCsv, readWorkbook } = await import('./lib/xlsxRead')
+      const sheets = /\.(csv|tsv|txt)$/i.test(file.name)
+        ? readCsv(await file.text(), file.name.replace(/\.[^.]+$/, ''))
+        : /\.xls$/i.test(file.name)
+          ? null
+          : await readWorkbook(new Uint8Array(await file.arrayBuffer()))
+      if (!sheets) return toast('That is an old-style .xls file. Open it in Excel, save it as .xlsx, and import that.')
+      setDialog({ kind: 'import', fileName: file.name, sheets })
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : "That file couldn't be read.")
+    }
+  }
+
+  const importButton = (
+    <button className="btn" onClick={() => importInput.current?.click()} title="Add tasks and risks from an .xlsx or .csv file, to a new project or this one">Import from Excel</button>
+  )
+
   const dialogProps = { dispatch, onClose: closeDialog, toast }
 
   return (
@@ -120,6 +144,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
           </nav>
         </div>
         <button className="btn" onClick={() => setDialog({ kind: 'project', isNew: true })}>+ New project</button>
+        {importButton}
         <div className="rail-foot">
           <button className="btn ghost small" onClick={() => setDialog({ kind: 'backup' })}>Back up data</button>
           <button className="btn ghost small" onClick={() => fileInput.current?.click()}>Restore</button>
@@ -131,6 +156,14 @@ export default function App({ initialState }: { initialState?: AppState }) {
             data-testid="restore-input"
             onChange={(e) => { void onRestoreFile(e.target.files?.[0]); e.target.value = '' }}
           />
+          <input
+            ref={importInput}
+            type="file"
+            accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+            hidden
+            data-testid="import-input"
+            onChange={(e) => { void onImportFile(e.target.files?.[0]); e.target.value = '' }}
+          />
         </div>
       </aside>
 
@@ -139,7 +172,10 @@ export default function App({ initialState }: { initialState?: AppState }) {
           <div className="blank">
             <h2>Start your first project</h2>
             <p>A project holds a plan of dated tasks, shown as a Gantt chart, and a board of tickets.</p>
-            <button className="btn primary" onClick={() => setDialog({ kind: 'project', isNew: true })}>Create a project</button>
+            <div className="blank-actions">
+              <button className="btn primary" onClick={() => setDialog({ kind: 'project', isNew: true })}>Create a project</button>
+              {importButton}
+            </div>
           </div>
         ) : (
           <>
@@ -240,6 +276,7 @@ export default function App({ initialState }: { initialState?: AppState }) {
       {dialog?.kind === 'task' && project && <TaskDialog {...dialogProps} project={project} task={dialog.task} />}
       {dialog?.kind === 'ticket' && project && <TicketDialog {...dialogProps} project={project} ticket={dialog.ticket} status={dialog.status} />}
       {dialog?.kind === 'backup' && <BackupDialog state={state} onClose={closeDialog} toast={toast} />}
+      {dialog?.kind === 'import' && <ImportDialog {...dialogProps} fileName={dialog.fileName} sheets={dialog.sheets} project={project} />}
       {dialog?.kind === 'restore' && <RestoreDialog {...dialogProps} data={dialog.data} />}
       {toastMsg && <div className="toast" role="status">{toastMsg}</div>}
     </div>

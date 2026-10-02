@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import type { Dispatch } from 'react'
 import { fromDay, toDay, today } from '../lib/dates'
+import { nameFromFile, readPlan } from '../lib/importPlan'
 import { childrenOf, dropsLinks, outline } from '../lib/plan'
 import { projectKey } from '../lib/schedule'
 import { makeId } from '../lib/storage'
 import { LINK_TYPES, PRIORITIES, STATUSES, TICKET_TYPES } from '../lib/types'
 import type { AppState, Dependency, LinkType, Project, Status, Task, Ticket } from '../lib/types'
+import type { SheetData } from '../lib/xlsxRead'
 import type { Action } from '../state/reducer'
 import { DeleteButton, Field, FormError, Modal } from './Modal'
 
@@ -324,6 +326,91 @@ export function RestoreDialog({ data, dispatch, onClose, toast }: DialogBase & {
     >
       <p>It holds {n} project{n === 1 ? '' : 's'}: {data.projects.map((p) => p.name).join(', ')}.</p>
       <p className="note">Restoring replaces everything currently in this browser.</p>
+    </Modal>
+  )
+}
+
+interface ImportDialogProps extends DialogBase {
+  fileName: string
+  sheets: SheetData[]
+  /** The open project, which imported rows can be added to. */
+  project?: Project
+}
+
+/** Shows what was found in a spreadsheet, then adds it to a new project or the open one. */
+export function ImportDialog({ fileName, sheets, project, dispatch, onClose, toast }: ImportDialogProps) {
+  const preview = readPlan(sheets, 'weekdays')
+  const [target, setTarget] = useState<'new' | 'current'>('new')
+  const [name, setName] = useState(preview.project?.name ?? nameFromFile(fileName))
+  const nTasks = preview.tasks.length
+  const nRisks = preview.risks.length
+  const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+  const save = () => {
+    const actions: Action[] = []
+    let week = project?.workWeek ?? 'weekdays'
+    if (target === 'new' || !project) {
+      const fields = { name: name.trim() || nameFromFile(fileName), description: preview.project?.description ?? '' }
+      actions.push({ type: 'createProject', project: { id: makeId(), ...fields, key: projectKey(fields.name) } })
+      week = 'weekdays'
+    }
+    // Read again for the project's working week, so durations count the same days.
+    const { tasks, risks } = readPlan(sheets, week)
+    actions.push({ type: 'importItems', tasks, risks }, { type: 'setView', view: tasks.length ? 'gantt' : 'risks' })
+    dispatch({ type: 'batch', actions })
+    onClose()
+    toast(`Imported ${[nTasks && count(nTasks, 'task'), nRisks && count(nRisks, 'risk')].filter(Boolean).join(' and ')}`)
+  }
+
+  const found = nTasks + nRisks > 0
+  return (
+    <Modal
+      title="Import from Excel"
+      onClose={onClose}
+      onSubmit={() => found && save()}
+      footer={<div className="r">
+        <button type="button" className="btn" onClick={onClose}>{found ? 'Cancel' : 'Close'}</button>
+        {found && <button className="btn primary">Import</button>}
+      </div>}
+    >
+      {found ? (
+        <div className="import">
+          <p>
+            Found {[nTasks && `${count(nTasks, 'task')} on the “${preview.taskSheet}” sheet`, nRisks && `${count(nRisks, 'risk')} on the “${preview.riskSheet}” sheet`].filter(Boolean).join(' and ')} in <b>{fileName}</b>.
+          </p>
+          {nTasks > 0 && <p className="note">Task columns used: {preview.taskColumns.join(', ')}.</p>}
+          {nRisks > 0 && <p className="note">Risk columns used: {preview.riskColumns.join(', ')}.</p>}
+          {preview.warnings.length > 0 && (
+            <div className="note error" role="alert">
+              {preview.warnings.slice(0, 3).map((w) => <p key={w}>{w}</p>)}
+              {preview.warnings.length > 3 && <p>…and {preview.warnings.length - 3} more.</p>}
+            </div>
+          )}
+          <fieldset className="choices">
+            <legend>Add them to</legend>
+            <label className="choice">
+              <input type="radio" name="target" checked={target === 'new'} onChange={() => setTarget('new')} />
+              <span>A new project named</span>
+              <input className="input" aria-label="New project name" value={name} disabled={target !== 'new'} onChange={(e) => setName(e.target.value)} />
+            </label>
+            {project && (
+              <label className="choice">
+                <input type="radio" name="target" checked={target === 'current'} onChange={() => setTarget('current')} />
+                <span>The end of “{project.name}”</span>
+              </label>
+            )}
+          </fieldset>
+        </div>
+      ) : (
+        <>
+          <p>Nothing to import was found in <b>{fileName}</b>.</p>
+          <p className="note">
+            The first rows of a sheet need column headings. For tasks, use Task (or Name) plus any of Start, Finish, Days,
+            % Complete, Assignee, Predecessors and Notes. For risks, use Risk plus Impact or Likelihood, and optionally Type and Notes.
+            A file exported from this app works as a template.
+          </p>
+        </>
+      )}
     </Modal>
   )
 }
