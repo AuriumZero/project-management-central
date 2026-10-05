@@ -11,6 +11,7 @@ import type { ChartRow, DragMode } from '../lib/schedule'
 import type { Project, Task } from '../lib/types'
 import type { Action } from '../state/reducer'
 import { AssigneeList, newTask } from './Dialogs'
+import { clampColumn, ColumnResizer, fitColumn, MIN_COLUMN, useColumnWidths } from './ColumnResizer'
 
 export interface GanttHandle {
   scrollToToday: () => void
@@ -67,21 +68,27 @@ function useNarrow() {
 }
 
 /** Column widths in pixels; the grid is as wide as the visible columns. */
-function columns(details: boolean, narrow: boolean) {
+function columns(details: boolean, narrow: boolean, sized: Record<string, number> = {}) {
   const show = details && !narrow
+  const w = (key: ResizableColumn, fallback: number) => show || key === 'name' ? sized[key] ?? fallback : 0
   return {
     show,
     id: 32,
-    name: narrow ? 140 : 220,
+    name: w('name', narrow ? 140 : 220),
     actions: narrow ? 58 : 112,
-    start: show ? 112 : 0,
-    finish: show ? 112 : 0,
-    days: show ? 46 : 0,
-    preds: show ? 84 : 0,
-    assignee: show ? 96 : 0,
-    pct: show ? 46 : 0,
+    start: w('start', 112),
+    finish: w('finish', 112),
+    days: w('days', 46),
+    preds: w('preds', 84),
+    assignee: w('assignee', 96),
+    pct: w('pct', 46),
   }
 }
+
+/** Columns whose headings have a drag handle, with the heading the handle names. */
+const RESIZABLE = { name: 'Task', start: 'Start', finish: 'Finish', days: 'Days', preds: 'Predecessors', assignee: 'Assignee', pct: '%' } as const
+type ResizableColumn = keyof typeof RESIZABLE
+const COLUMNS_KEY = 'pmc.ui.planColumns'
 
 const GRID_KEY = 'pmc.ui.gridWidth'
 function savedGridWidth(): number | null {
@@ -97,7 +104,8 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
   const { tasks, zoom } = project
   const todayDay = today()
   const narrow = useNarrow()
-  const col = columns(details, narrow)
+  const [sized, setSized] = useColumnWidths(COLUMNS_KEY)
+  const col = columns(details, narrow, sized)
   const full = col.id + col.name + col.assignee + col.start + col.finish + col.days + col.preds + col.pct + col.actions
   // The table pane can be dragged narrower than its columns, like Microsoft Project's split view.
   const [gridWidth, setGridWidth] = useState<number | null>(savedGridWidth)
@@ -152,6 +160,33 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
   }
   const splitter = !narrow && (
     <div className="g-split" role="separator" aria-orientation="vertical" aria-label="Resize the task table" title="Drag to resize the table" onPointerDown={startSplit} />
+  )
+  // Widening a column widens the table pane by the same amount, so the other columns stay in view.
+  const colDrag = useRef<{ key: ResizableColumn; w0: number; left0: number } | null>(null)
+  const resizeColumn = (key: ResizableColumn, width: number, base = colDrag.current ?? { key, w0: col[key], left0: left }, save = true) => {
+    const w = clampColumn(width, key === 'name' ? 80 : MIN_COLUMN)
+    setSized(key, w)
+    if (narrow) return
+    const pane = Math.max(200, base.left0 + w - base.w0)
+    setGridWidth(pane)
+    if (save) try { localStorage.setItem(GRID_KEY, String(pane)) } catch { /* not critical */ }
+  }
+  const resizer = (key: ResizableColumn) => (
+    <ColumnResizer
+      label={RESIZABLE[key]}
+      width={col[key]}
+      onStart={() => { colDrag.current = { key, w0: col[key], left0: left } }}
+      onResize={(dx, done) => {
+        const base = colDrag.current
+        if (!base) return
+        resizeColumn(key, base.w0 + dx, base, done)
+        if (done) colDrag.current = null
+      }}
+      onFit={() => {
+        const w = fitColumn(names.current, `c-${key}`, key === 'name' ? 80 : MIN_COLUMN)
+        if (w) resizeColumn(key, w)
+      }}
+    />
   )
   const [drag, setDrag] = useState<Drag | null>(null)
   const [link, setLink] = useState<LinkDrag | null>(null)
@@ -430,15 +465,15 @@ export function GanttChart({ project, dispatch, onEditTask, toast, details, ref 
             <div className="g-clip" ref={headClip}>
               <div className="grid-row" style={{ width: full }} role="row">
                 <span className="c-id label" role="columnheader">ID</span>
-                <span className="c-name label" role="columnheader">Task</span>
+                <span className="c-name label" role="columnheader">Task{resizer('name')}</span>
                 <span className="c-actions label" role="columnheader"><span className="sr-only">Actions</span></span>
                 {col.show && <>
-                  <span className="c-start label" role="columnheader">Start</span>
-                  <span className="c-finish label" role="columnheader">Finish</span>
-                  <span className="c-days label" role="columnheader">Days</span>
-                  <span className="c-preds label" role="columnheader" title="Predecessors: row numbers, e.g. 3 or 5SS+2d">Pred.</span>
-                  <span className="c-assignee label" role="columnheader">Assignee</span>
-                  <span className="c-pct label" role="columnheader">%</span>
+                  <span className="c-start label" role="columnheader">Start{resizer('start')}</span>
+                  <span className="c-finish label" role="columnheader">Finish{resizer('finish')}</span>
+                  <span className="c-days label" role="columnheader">Days{resizer('days')}</span>
+                  <span className="c-preds label" role="columnheader" title="Predecessors: row numbers, e.g. 3 or 5SS+2d">Pred.{resizer('preds')}</span>
+                  <span className="c-assignee label" role="columnheader">Assignee{resizer('assignee')}</span>
+                  <span className="c-pct label" role="columnheader">%{resizer('pct')}</span>
                 </>}
               </div>
             </div>

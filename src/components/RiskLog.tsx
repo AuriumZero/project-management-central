@@ -5,6 +5,7 @@ import { makeId } from '../lib/storage'
 import { IMPACTS, RISK_KINDS } from '../lib/types'
 import type { Impact, Project, Risk, RiskKind } from '../lib/types'
 import type { Action } from '../state/reducer'
+import { clampColumn, ColumnResizer, fitColumn, useColumnWidths } from './ColumnResizer'
 
 export interface RiskLogHandle {
   /** Adds a row and puts the cursor in its name. */
@@ -29,6 +30,11 @@ const COLUMNS: { key: SortKey; cls: string; label: string; title?: string }[] = 
   { key: 'likelihood', cls: 'r-likely', label: 'Likelihood', title: "How likely it is to happen. An issue already has, so it's 100%." },
   { key: 'notes', cls: 'r-notes', label: 'Notes' },
 ]
+/** Starting widths in pixels. Notes also takes up any spare room so the table fills its box. */
+const DEFAULT_WIDTHS: Record<string, number> = { 'r-id': 52, 'r-name': 360, 'r-kind': 92, 'r-impact': 96, 'r-likely': 104, 'r-notes': 240, 'r-actions': 48 }
+const RESIZABLE = ['r-name', 'r-kind', 'r-impact', 'r-likely', 'r-notes']
+const COLUMNS_KEY = 'pmc.ui.riskColumns'
+
 /** Columns a paste fills, left to right. */
 const PASTE_COLUMNS = ['r-name', 'r-kind', 'r-impact', 'r-likely', 'r-notes']
 
@@ -101,6 +107,34 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
   // Drag a row by its ID to reorder the register. Rows can only be dragged in
   // your own order, not while sorted by a column.
   const box = useRef<HTMLDivElement>(null)
+  const [sized, setSized] = useColumnWidths(COLUMNS_KEY)
+  const [boxWidth, setBoxWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const measure = () => setBoxWidth(el.clientWidth)
+    measure()
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [risks.length > 0])
+  const widths = { ...DEFAULT_WIDTHS, ...sized }
+  const others = Object.entries(widths).reduce((sum, [k, w]) => k === 'r-notes' ? sum : sum + w, 0)
+  widths['r-notes'] = Math.max(widths['r-notes'], boxWidth - others)
+  const tableWidth = others + widths['r-notes']
+  const colStart = useRef(0)
+  const resizer = (cls: string, label: string) => RESIZABLE.includes(cls) && (
+    <ColumnResizer
+      label={label}
+      width={widths[cls]}
+      onStart={() => { colStart.current = widths[cls] }}
+      onResize={(dx) => setSized(cls, clampColumn(colStart.current + dx, 48))}
+      onFit={() => {
+        const w = fitColumn(table.current?.tBodies[0] ?? null, cls, 48)
+        if (w) setSized(cls, w)
+      }}
+    />
+  )
   const [drag, setDrag] = useState<{ id: string; before: string | null; y: number } | null>(null)
   const [focusGrip, setFocusGrip] = useState<string | null>(null)
 
@@ -231,7 +265,10 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
   return (
     <div className="risks" ref={box}>
       {drag && <div className="drop-line" style={{ top: drag.y - 1, left: 0 }} aria-hidden="true" />}
-      <table className="risk-table" ref={table} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Risks and issues">
+      <table className="risk-table" ref={table} style={{ width: tableWidth }} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Risks and issues">
+        <colgroup>
+          {Object.keys(DEFAULT_WIDTHS).map((cls) => <col key={cls} className={cls} style={{ width: widths[cls] }} />)}
+        </colgroup>
         <thead>
           <tr>
             {COLUMNS.map((c) => (
@@ -240,6 +277,7 @@ export function RiskLog({ project, dispatch, toast, ref }: RiskLogProps) {
                   {c.label}
                   <span className="sort-mark" aria-hidden="true">{sort?.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}</span>
                 </button>
+                {resizer(c.cls, c.label)}
               </th>
             ))}
             <th className="r-actions"><span className="sr-only">Actions</span></th>
@@ -381,6 +419,19 @@ function NotesCell({ value, label, onCommit }: { value: string; label: string; o
     el.style.height = `${el.scrollHeight + 2}px`
   }
   useLayoutEffect(fit, [value])
+  // Re-fit when the column is resized, since the text wraps differently.
+  useEffect(() => {
+    const el = area.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let width = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      fit()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   return (
     <textarea
       key={value}
