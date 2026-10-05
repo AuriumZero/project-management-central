@@ -164,6 +164,38 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /^Move Old blog URLs/ })).toBeDisabled()
   })
 
+  it('resizes plan columns by dragging or with the arrow keys, and remembers the width', async () => {
+    const user = renderApp()
+    const names = screen.getByRole('grid', { name: 'Tasks' })
+    const handle = screen.getByRole('separator', { name: 'Resize the Task column' })
+    expect(handle).toHaveAttribute('aria-valuenow', '220')
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientX: 250, pointerId: 1 })
+    fireEvent.pointerUp(handle, { clientX: 250, pointerId: 1 })
+    expect(handle).toHaveAttribute('aria-valuenow', '370')
+    expect(names.closest<HTMLElement>('.gantt')!.style.getPropertyValue('--c-name')).toBe('370px')
+    handle.focus()
+    await user.keyboard('{ArrowLeft}')
+    expect(handle).toHaveAttribute('aria-valuenow', '354')
+    expect(JSON.parse(localStorage.getItem('pmc.ui.planColumns')!)).toEqual({ name: 354 })
+
+    await user.click(screen.getByRole('button', { name: 'Show columns' }))
+    screen.getByRole('separator', { name: 'Resize the Assignee column' }).focus()
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}')
+    expect(screen.getByRole('separator', { name: 'Resize the Assignee column' })).toHaveAttribute('aria-valuenow', '160')
+  })
+
+  it('resizes risk register columns', async () => {
+    const user = renderApp()
+    await user.click(screen.getByRole('tab', { name: 'Risks & issues' }))
+    const handle = screen.getByRole('separator', { name: 'Resize the Risk or issue column' })
+    handle.focus()
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(handle).toHaveAttribute('aria-valuenow', '392')
+    expect(document.querySelector<HTMLElement>('col.r-name')!.style.width).toBe('392px')
+    expect(JSON.parse(localStorage.getItem('pmc.ui.riskColumns')!)).toEqual({ 'r-name': 392 })
+  })
+
   it('refuses an edit that ends before it starts', async () => {
     const user = renderApp()
     await user.click(screen.getByRole('button', { name: 'Edit Wireframes' }))

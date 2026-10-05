@@ -246,6 +246,15 @@ fieldset.links { display: flex; flex-direction: column; gap: 6px }
 .g-clip { overflow: hidden; width: 100%; height: 100% }
 .g-clip > .grid-row, .g-clip > .g-add { width: var(--full) }
 .g-names .g-clip > .grid-row { width: var(--full) }
+/* Drag the right edge of a column heading to resize it */
+.g-corner .grid-row > span { position: relative }
+.col-resize { position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; cursor: col-resize; z-index: 3; touch-action: none }
+.g-corner .col-resize { top: -8px; bottom: -7px }
+.col-resize::after { content: ""; position: absolute; left: 4px; top: 4px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--line); opacity: 0; transition: opacity .12s, background .12s }
+th:hover > .col-resize::after, [role=columnheader]:hover > .col-resize::after { opacity: 1 }
+.col-resize:hover::after, .col-resize:focus-visible::after { opacity: 1; background: var(--accent) }
+.col-resize:focus-visible { outline: none }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none }
 .g-split { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 9; touch-action: none }
 .g-split::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .12s }
 .g-split:hover::after { background: var(--accent) }
@@ -254,25 +263,21 @@ fieldset.links { display: flex; flex-direction: column; gap: 6px }
 
 /* Risk and issue log */
 .risks { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto }
-.risk-table { width: 100%; min-width: 720px; border-collapse: collapse; table-layout: fixed }
-.risk-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 10px 6px; border-bottom: 1px solid var(--line); background: var(--sunk) }
+.risk-table { border-collapse: collapse; table-layout: fixed }
+.risk-table th { position: relative; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 10px 6px; border-bottom: 1px solid var(--line); background: var(--sunk) }
 .risk-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top }
-.risk-table .r-id { width: 52px; color: var(--muted); font-size: 12px; padding: 4px 4px 4px 2px }
+.risk-table .r-id { color: var(--muted); font-size: 12px; padding: 4px 4px 4px 2px }
 .risk-table td.r-id .grip { height: 26px }
 .grip:disabled { cursor: default }
 .grip:disabled:hover { color: inherit; background: none; padding: 0 }
 .risk-table th.r-id { padding-top: 10px }
-.risk-table .r-name { width: 30% }
-.risk-table .r-impact { width: 96px }
-.risk-table .r-kind { width: 92px }
 .risk-table th .sort { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit }
 .risk-table th .sort:hover { color: var(--fg) }
 .risk-table th .sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px }
 .risk-table th[aria-sort=ascending], .risk-table th[aria-sort=descending] { color: var(--fg) }
 .sort-mark { font-size: 9px; min-width: 9px }
 .cell.kind[data-kind=issue] { color: var(--p-urgent) }
-.risk-table .r-likely { width: 104px }
-.risk-table .r-actions { width: 48px; text-align: right }
+.risk-table .r-actions { text-align: right }
 .risk-table select.cell { padding: 4px 3px; font-weight: 600 }
 .risk-table select.cell:hover { border-color: var(--line) }
 .cell.impact[data-impact=low] { color: var(--p-low) }
